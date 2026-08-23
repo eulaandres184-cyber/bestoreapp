@@ -1,0 +1,2068 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE STORE | Control de Stock & Punto de Venta (Uso Interno)</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        bonewhite: {
+                            50: '#fcfbf9',
+                            100: '#f7f6f2', // Primary bone-white background
+                            200: '#eeebe3',
+                            300: '#e2ddcf',
+                            border: '#e5e2d8'
+                        },
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#4f46e5',
+                            600: '#4338ca',
+                            700: '#3730a3',
+                            accent: '#0284c7',
+                            emerald: '#059669',
+                            amber: '#d97706'
+                        },
+                        slatecard: '#ffffff'
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Chart.js for Business Metrics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #f7f6f2;
+            color: #1e293b;
+        }
+
+        .font-mono-num {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .custom-card {
+            background-color: #ffffff;
+            border: 1px solid #e5e2d8;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+            border-radius: 1rem;
+        }
+
+        .custom-card-hover {
+            transition: all 0.2s ease-in-out;
+        }
+        .custom-card-hover:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.06);
+        }
+
+        .sidebar-item {
+            transition: all 0.15s ease;
+            border-radius: 0.75rem;
+        }
+
+        .sidebar-item.active {
+            background-color: #4f46e5;
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+        }
+
+        .sidebar-item.active i {
+            color: #ffffff !important;
+        }
+
+        /* Scrollbar customization */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f7f6f2;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #printableTicketArea, #printableTicketArea * {
+                visibility: visible;
+            }
+            #printableTicketArea {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body class="h-full bg-bonewhite-100 text-slate-800 flex overflow-hidden">
+
+    <!-- MAIN PC SIDEBAR -->
+    <aside class="w-64 bg-white border-r border-bonewhite-border flex flex-col justify-between shrink-0 z-20 shadow-sm">
+        <div>
+            <!-- Brand Logo Header -->
+            <div class="p-5 border-b border-bonewhite-border flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-800 text-white font-extrabold flex items-center justify-center text-lg shadow-md shadow-brand-500/20">
+                        BE
+                    </div>
+                    <div>
+                        <h1 class="font-extrabold text-slate-900 text-base leading-tight">BE STORE</h1>
+                        <span class="text-[11px] font-semibold text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full inline-block">Stock & POS System</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation Links -->
+            <nav class="p-3 space-y-1">
+                <div class="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Panel Principal</div>
+                
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-chart-pie text-brand-500 w-4 text-center"></i>
+                    <span>Dashboard / Resumen</span>
+                </button>
+
+                <button onclick="switchTab('pos')" id="nav-pos" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-cash-register text-emerald-600 w-4 text-center"></i>
+                        <span>Punto de Venta (POS)</span>
+                    </div>
+                    <span class="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">Caja</span>
+                </button>
+
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Gestión de Inventario</div>
+
+                <button onclick="switchTab('inventory-acc')" id="nav-inventory-acc" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-boxes-stacked text-brand-accent w-4 text-center"></i>
+                        <span>Accesorios y Cargas</span>
+                    </div>
+                    <span id="badgeLowStock" class="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded hidden">0</span>
+                </button>
+
+                <button onclick="switchTab('inventory-phones')" id="nav-inventory-phones" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-mobile-screen-button text-purple-600 w-4 text-center"></i>
+                        <span>Celulares (Nuevos/Usados)</span>
+                    </div>
+                    <span id="badgePhonesCount" class="bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.5 rounded">0</span>
+                </button>
+
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Herramientas</div>
+
+                <button onclick="switchTab('sales-history')" id="nav-sales-history" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-receipt text-slate-500 w-4 text-center"></i>
+                    <span>Historial de Ventas</span>
+                </button>
+
+                <button onclick="switchTab('canje-calculator')" id="nav-canje-calculator" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-arrows-rotate text-emerald-500 w-4 text-center"></i>
+                    <span>Plan Canje & Usados</span>
+                </button>
+
+                <button onclick="switchTab('sheets-sync')" id="nav-sheets-sync" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-file-csv text-emerald-600 w-4 text-center"></i>
+                        <span>Sincro Google Sheets</span>
+                    </div>
+                    <i class="fa-solid fa-link text-[10px] text-emerald-600"></i>
+                </button>
+            </nav>
+        </div>
+
+        <!-- System User & Status -->
+        <div class="p-3 border-t border-bonewhite-border bg-slate-50/50">
+            <div class="bg-white p-3 rounded-xl border border-bonewhite-border flex items-center justify-between">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                        OP
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-xs font-bold text-slate-900 truncate">Operador Local</p>
+                        <p class="text-[10px] text-slate-500 flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Sistema Interno
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN WORKSPACE CONTENT -->
+    <div class="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        
+        <!-- Top Application Header Bar -->
+        <header class="bg-white border-b border-bonewhite-border px-6 py-3 flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-4">
+                <h2 id="pageTitle" class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                    <i class="fa-solid fa-chart-pie text-brand-600"></i> Dashboard General
+                </h2>
+                <div class="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 text-xs text-slate-600">
+                    <i class="fa-solid fa-file-excel text-emerald-600"></i>
+                    <span>Base de datos: <strong class="text-slate-900 font-semibold">Google Sheets Sync Activo</strong></span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <!-- Clock / Date widget -->
+                <div class="hidden lg:flex flex-col text-right pr-3 border-r border-slate-200">
+                    <span id="clockTime" class="font-mono-num text-xs font-bold text-slate-900">00:00:00</span>
+                    <span id="clockDate" class="text-[10px] text-slate-500">12 Feb 2026</span>
+                </div>
+
+                <!-- Fast POS Shortcut Button -->
+                <button onclick="switchTab('pos')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-sm transition">
+                    <i class="fa-solid fa-plus-circle"></i>
+                    <span>Nueva Venta</span>
+                </button>
+
+                <!-- Quick Product Modal Button -->
+                <button onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-sm transition">
+                    <i class="fa-solid fa-box-archive"></i>
+                    <span>Cargar Producto</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dynamic Main Scrollable View Area -->
+        <main class="flex-1 overflow-y-auto p-6 bg-bonewhite-100">
+
+            <!-- SECTION 1: DASHBOARD OVERVIEW -->
+            <section id="view-dashboard" class="space-y-6">
+                <!-- Top Key Metrics Cards -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    
+                    <div class="custom-card p-4 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Valor Total Inventario</p>
+                            <h3 id="dashTotalValue" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">$0</h3>
+                            <p class="text-[11px] text-emerald-600 font-medium mt-1"><i class="fa-solid fa-arrow-up text-[9px]"></i> Precio Lista Venta</p>
+                        </div>
+                        <div class="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-vault"></i>
+                        </div>
+                    </div>
+
+                    <div class="custom-card p-4 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Celulares en Stock</p>
+                            <h3 id="dashPhonesCount" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 unidades</h3>
+                            <p id="dashPhonesSub" class="text-[11px] text-purple-600 font-medium mt-1">0 Nuevos / 0 Usados</p>
+                        </div>
+                        <div class="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-mobile-screen"></i>
+                        </div>
+                    </div>
+
+                    <div class="custom-card p-4 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ventas Realizadas Hoy</p>
+                            <h3 id="dashSalesToday" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 oper.</h3>
+                            <p id="dashRevenueToday" class="text-[11px] text-emerald-600 font-medium mt-1">$0 facturado</p>
+                        </div>
+                        <div class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-circle-dollar-to-slot"></i>
+                        </div>
+                    </div>
+
+                    <div class="custom-card p-4 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Alertas de Stock Bajo</p>
+                            <h3 id="dashLowStockCount" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 ítems</h3>
+                            <p class="text-[11px] text-amber-600 font-medium mt-1">Reponer pronto</p>
+                        </div>
+                        <div class="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Main Charts & Recent Activity Grid -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Category Stock Breakdown Chart -->
+                    <div class="lg:col-span-7 custom-card p-5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-chart-bar text-brand-600"></i> Distribución de Stock por Categoría
+                            </h3>
+                            <button onclick="switchTab('inventory-acc')" class="text-xs text-brand-600 hover:underline font-semibold">
+                                Ver Inventario Completo
+                            </button>
+                        </div>
+                        <div class="h-64 relative">
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Quick Stock Alert Panel -->
+                    <div class="lg:col-span-5 custom-card p-5 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-3 border-b border-bonewhite-border pb-2">
+                                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                                    <i class="fa-solid fa-bell text-amber-500"></i> Productos con Stock Crítico
+                                </h3>
+                                <span class="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Revisar</span>
+                            </div>
+
+                            <div id="dashLowStockList" class="space-y-2 max-h-52 overflow-y-auto pr-1">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <div class="pt-4 border-t border-bonewhite-border mt-4">
+                            <button onclick="exportStockCSV()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-2 rounded-xl flex items-center justify-center gap-2 transition">
+                                <i class="fa-solid fa-download text-slate-500"></i> Exportar Lista de Reposición (CSV)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions Shortcuts -->
+                <div class="custom-card p-5 bg-gradient-to-r from-white via-indigo-50/20 to-emerald-50/20">
+                    <h3 class="font-bold text-slate-900 text-sm mb-3">Acciones Rápidas del Sistema</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <button onclick="switchTab('pos')" class="p-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl flex items-center gap-3 transition group text-left">
+                            <div class="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-base group-hover:bg-emerald-600 group-hover:text-white transition">
+                                <i class="fa-solid fa-cash-register"></i>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-slate-900 block">Cobrar en Caja</span>
+                                <span class="text-[10px] text-slate-500">Iniciar punto de venta</span>
+                            </div>
+                        </button>
+
+                        <button onclick="openPhoneModal()" class="p-3 bg-white border border-slate-200 hover:border-purple-500 rounded-xl flex items-center gap-3 transition group text-left">
+                            <div class="w-9 h-9 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center text-base group-hover:bg-purple-600 group-hover:text-white transition">
+                                <i class="fa-solid fa-mobile-screen"></i>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-slate-900 block">+ Ingresar Celular</span>
+                                <span class="text-[10px] text-slate-500">Nuevo o Usado con IMEI</span>
+                            </div>
+                        </button>
+
+                        <button onclick="switchTab('canje-calculator')" class="p-3 bg-white border border-slate-200 hover:border-amber-500 rounded-xl flex items-center gap-3 transition group text-left">
+                            <div class="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-base group-hover:bg-amber-600 group-hover:text-white transition">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-slate-900 block">Cotizar Canje</span>
+                                <span class="text-[10px] text-slate-500">Evaluar equipo usado</span>
+                            </div>
+                        </button>
+
+                        <button onclick="switchTab('sheets-sync')" class="p-3 bg-white border border-slate-200 hover:border-blue-500 rounded-xl flex items-center gap-3 transition group text-left">
+                            <div class="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-base group-hover:bg-blue-600 group-hover:text-white transition">
+                                <i class="fa-solid fa-file-csv"></i>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-slate-900 block">Sincronizar Sheets</span>
+                                <span class="text-[10px] text-slate-500">Importar/Exportar CSV</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: POINT OF SALE (POS / CAJA) -->
+            <section id="view-pos" class="hidden h-full flex flex-col lg:flex-row gap-6">
+                
+                <!-- Left Catalog / Item Selector (65% width on PC) -->
+                <div class="lg:w-7/12 flex flex-col space-y-4">
+                    
+                    <!-- Search & Filter Controls -->
+                    <div class="custom-card p-4 space-y-3">
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                            <input 
+                                type="text" 
+                                id="posSearchInput" 
+                                oninput="filterPOSItems()"
+                                placeholder="Buscar por nombre, SKU, marca, modelo o IMEI..." 
+                                class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                            >
+                        </div>
+
+                        <!-- Category Filter Pills -->
+                        <div class="flex items-center gap-2 overflow-x-auto pb-1" id="posCategoryPills">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Items Grid Picker -->
+                    <div id="posItemsGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto flex-1 max-h-[calc(100vh-280px)] pr-1">
+                        <!-- Populated dynamically -->
+                    </div>
+
+                </div>
+
+                <!-- Right Live Order Ticket & Checkout (35% width on PC) -->
+                <div class="lg:w-5/12 custom-card p-5 flex flex-col justify-between space-y-4 bg-white shadow-md">
+                    <div>
+                        <!-- Ticket Header -->
+                        <div class="flex items-center justify-between pb-3 border-b border-bonewhite-border">
+                            <div>
+                                <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                                    <i class="fa-solid fa-receipt text-emerald-600"></i> Comprobante de Venta Actual
+                                </h3>
+                                <p class="text-[10px] text-slate-500">Atención al cliente en mostrador</p>
+                            </div>
+                            <button onclick="clearPOSTicket()" class="text-[11px] text-red-600 hover:underline font-semibold">
+                                Vaciar Ticket
+                            </button>
+                        </div>
+
+                        <!-- Customer Info Box -->
+                        <div class="mt-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                            <div class="flex items-center justify-between text-xs font-bold text-slate-700">
+                                <span>Datos del Cliente (Opcional):</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <input type="text" id="posCustomerName" placeholder="Nombre completo" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                                <input type="text" id="posCustomerPhone" placeholder="Teléfono / WhatsApp" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                            </div>
+                        </div>
+
+                        <!-- Ticket Items List -->
+                        <div id="posTicketList" class="mt-3 space-y-2 max-h-60 overflow-y-auto pr-1">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Payment Summary & Actions -->
+                    <div class="pt-3 border-t border-bonewhite-border space-y-3">
+                        
+                        <!-- Payment Method Toggle -->
+                        <div class="space-y-1">
+                            <label class="block text-[11px] font-bold text-slate-700">Forma de Pago:</label>
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <button id="posPayTransfer" onclick="setPOSPaymentMethod('transfer')" class="py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition">
+                                    Efectivo / Transf. (-15%)
+                                </button>
+                                <button id="posPayCard" onclick="setPOSPaymentMethod('card')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
+                                    Tarjeta / Lista
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Trade-in Deduction Option -->
+                        <div class="flex items-center justify-between bg-amber-50 p-2.5 rounded-xl border border-amber-200">
+                            <div class="flex items-center gap-2 text-xs font-bold text-amber-900">
+                                <i class="fa-solid fa-arrows-rotate text-amber-600"></i>
+                                <span>Descuento por Canje:</span>
+                            </div>
+                            <div class="flex items-center gap-1 w-28">
+                                <span class="text-xs font-bold text-amber-800">$</span>
+                                <input type="number" id="posCanjeDeduction" oninput="calculatePOSTotals()" placeholder="0" class="w-full p-1 bg-white border border-amber-300 rounded text-xs text-right font-mono-num font-bold">
+                            </div>
+                        </div>
+
+                        <!-- Calculations -->
+                        <div class="space-y-1.5 text-xs text-slate-600 pt-1">
+                            <div class="flex justify-between">
+                                <span>Subtotal Bruto:</span>
+                                <span id="posSubtotal" class="font-mono-num font-bold">$0</span>
+                            </div>
+                            <div id="posDiscountRow" class="flex justify-between text-emerald-600 font-semibold">
+                                <span>Descuento Pago Contado (15%):</span>
+                                <span id="posDiscount" class="font-mono-num">-$0</span>
+                            </div>
+                            <div class="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-200">
+                                <span>Total Final a Cobrar:</span>
+                                <span id="posTotal" class="font-mono-num text-emerald-600 text-lg">$0</span>
+                            </div>
+                        </div>
+
+                        <!-- Complete Sale Button -->
+                        <button onclick="processPOSCheckout()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
+                            <i class="fa-solid fa-check-circle"></i>
+                            <span>Confirmar y Finalizar Venta</span>
+                        </button>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- SECTION 3: ACCESSORIES & TECH INVENTORY (INVENTARIO ACCESORIOS) -->
+            <section id="view-inventory-acc" class="hidden space-y-4">
+                
+                <!-- Action Bar & Filters -->
+                <div class="custom-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 w-full md:w-auto flex-1">
+                        <div class="relative flex-1 max-w-md">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                            <input 
+                                type="text" 
+                                id="accSearchInput" 
+                                oninput="renderAccTable()"
+                                placeholder="Buscar por producto, marca o SKU..." 
+                                class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-brand-500"
+                            >
+                        </div>
+                        <select id="accCategoryFilter" onchange="renderAccTable()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-700">
+                            <option value="ALL">Todas las Categorías</option>
+                            <option value="fundas">Fundas & Covers</option>
+                            <option value="proteccion">Vidrios Templados</option>
+                            <option value="cargadores">Cargadores & Cables</option>
+                            <option value="audio">Audio & Auriculares</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center gap-2 w-full md:w-auto">
+                        <button onclick="exportStockCSV()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 transition">
+                            <i class="fa-solid fa-file-csv text-emerald-600"></i> Exportar CSV
+                        </button>
+                        <button openProductModal() onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
+                            <i class="fa-solid fa-plus"></i> Nuevo Producto
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Products Data Table -->
+                <div class="custom-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
+                                    <th class="p-3.5">Producto</th>
+                                    <th class="p-3.5">Categoría</th>
+                                    <th class="p-3.5">Stock</th>
+                                    <th class="p-3.5">Costo (USD/ARS)</th>
+                                    <th class="p-3.5">Precio Lista</th>
+                                    <th class="p-3.5">Efectivo / Transf.</th>
+                                    <th class="p-3.5 text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="accTableBody" class="divide-y divide-bonewhite-border text-slate-700">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- SECTION 4: SMARTPHONES INVENTORY (CELULARES NUEVOS Y USADOS) -->
+            <section id="view-inventory-phones" class="hidden space-y-4">
+                
+                <!-- Action Bar & Status Filter -->
+                <div class="custom-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 w-full md:w-auto flex-1">
+                        <div class="relative flex-1 max-w-md">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                            <input 
+                                type="text" 
+                                id="phoneSearchInput" 
+                                oninput="renderPhonesTable()"
+                                placeholder="Buscar por marca, modelo, IMEI, capacidad o color..." 
+                                class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-purple-500"
+                            >
+                        </div>
+                        <select id="phoneConditionFilter" onchange="renderPhonesTable()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-700">
+                            <option value="ALL">Todos (Nuevos + Usados)</option>
+                            <option value="Nuevo">Solo Nuevos Sellados</option>
+                            <option value="Usado">Solo Usados / Reacondicionados</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center gap-2 w-full md:w-auto">
+                        <button onclick="openPhoneModal()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
+                            <i class="fa-solid fa-mobile-screen"></i> Ingresar Celular
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Phones Data Table -->
+                <div class="custom-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
+                                    <th class="p-3.5">Modelo / Smartphone</th>
+                                    <th class="p-3.5">Condición</th>
+                                    <th class="p-3.5">Batería %</th>
+                                    <th class="p-3.5">Capacidad / Color</th>
+                                    <th class="p-3.5">IMEI / Nro Serie</th>
+                                    <th class="p-3.5">Precio Efectivo</th>
+                                    <th class="p-3.5">Estado</th>
+                                    <th class="p-3.5 text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="phonesTableBody" class="divide-y divide-bonewhite-border text-slate-700">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- SECTION 5: SALES HISTORY (HISTORIAL DE VENTAS) -->
+            <section id="view-sales-history" class="hidden space-y-4">
+                <div class="custom-card p-4 flex items-center justify-between">
+                    <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-receipt text-slate-600"></i> Registro de Operaciones y Ventas
+                    </h3>
+                    <button onclick="exportSalesCSV()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-download text-emerald-600"></i> Exportar Ventas
+                    </button>
+                </div>
+
+                <div class="custom-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
+                                    <th class="p-3.5">N° Ticket / Fecha</th>
+                                    <th class="p-3.5">Cliente</th>
+                                    <th class="p-3.5">Productos / Detalle</th>
+                                    <th class="p-3.5">Medio Pago</th>
+                                    <th class="p-3.5">Total Cobrado</th>
+                                    <th class="p-3.5 text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="salesTableBody" class="divide-y divide-bonewhite-border text-slate-700">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 6: PLAN CANJE CALCULATOR & INTAKE -->
+            <section id="view-canje-calculator" class="hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <div class="lg:col-span-6 custom-card p-6 space-y-4">
+                        <h3 class="font-extrabold text-slate-900 text-base flex items-center gap-2 border-b border-bonewhite-border pb-3">
+                            <i class="fa-solid fa-calculator text-emerald-600"></i> Evaluador Técnico de Canje Usados
+                        </h3>
+
+                        <div class="space-y-3 text-xs">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Marca del Usado</label>
+                                <select id="canjeBrandSelect" onchange="updateCanjeModelOptions()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                    <option value="Apple">Apple iPhone</option>
+                                    <option value="Samsung">Samsung Galaxy</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Modelo Exacto</label>
+                                <select id="canjeModelSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">Almacenamiento</label>
+                                    <select id="canjeStorageSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                        <option value="64GB">64 GB</option>
+                                        <option value="128GB" selected>128 GB</option>
+                                        <option value="256GB">256 GB</option>
+                                        <option value="512GB">512 GB</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block font-bold text-slate-700 mb-1">Salud Batería (%)</label>
+                                    <input type="number" id="canjeBatteryInput" value="86" min="50" max="100" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">Estado Estético</label>
+                                <select id="canjeConditionSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                    <option value="Excelente">Excelente (Sin rayas, impecable)</option>
+                                    <option value="Bueno">Bueno (Marcas mínimas de uso)</option>
+                                    <option value="Detalles">Con detalles estéticos visibles</option>
+                                </select>
+                            </div>
+
+                            <button onclick="calculateTradeInValue()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-sm">
+                                Calcular Valor de Toma Estimado
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-6 custom-card p-6 flex flex-col justify-between space-y-4 bg-slate-50/50">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-sm mb-2">Resultado de la Cotización</h3>
+                            <div id="canjeResultCard" class="hidden bg-white border border-emerald-300 p-5 rounded-2xl shadow-sm text-center space-y-3">
+                                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Crédito a favor para el cliente</span>
+                                <div id="canjeValuationResult" class="text-3xl font-black font-mono-num text-emerald-600">$0</div>
+                                <p class="text-xs text-slate-600">Monto sugerido para tomar en parte de pago o descontar en la caja POS.</p>
+                                
+                                <div class="pt-2 flex gap-2">
+                                    <button onclick="applyCanjeToPOS()" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                                        Usar como Descuento en Caja
+                                    </button>
+                                    <button onclick="intakeUsedPhoneFromCanje()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                                        + Cargar a Stock Usados
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs space-y-1">
+                            <strong class="font-bold flex items-center gap-1"><i class="fa-solid fa-circle-info text-amber-600"></i> Criterio de Verificación Interna:</strong>
+                            <p class="text-[11px] leading-relaxed text-amber-800">
+                                Verificar siempre: Libre de iCloud / Cuenta Google, estado de TrueTone y FaceID/TouchID, reporte de ENACOM (IMEI limpio) y cámara sin manchas.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 7: GOOGLE SHEETS SYNC & CSV IMPORT/EXPORT -->
+            <section id="view-sheets-sync" class="hidden space-y-6">
+                <div class="custom-card p-6 space-y-4">
+                    <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
+                        <div>
+                            <h3 class="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                                <i class="fa-solid fa-file-csv text-emerald-600"></i> Sincronización con Google Sheets
+                            </h3>
+                            <p class="text-xs text-slate-500">Mantené actualizados tus precios y stock sincronizando con tu documento de Google Sheets.</p>
+                        </div>
+                        <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">CSV Ready</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Export CSV -->
+                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
+                            <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-file-export"></i>
+                            </div>
+                            <h4 class="font-bold text-slate-900 text-sm">Exportar Datos a Google Sheets</h4>
+                            <p class="text-xs text-slate-600">Descargá el archivo CSV estructurado para pegarlo o importarlo en tu planilla oficial de precios.</p>
+                            
+                            <div class="pt-2 space-y-2">
+                                <button onclick="exportStockCSV()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition">
+                                    <i class="fa-solid fa-download"></i> Descargar CSV Inventario Completo
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Import CSV -->
+                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
+                            <div class="w-10 h-10 rounded-xl bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-file-import"></i>
+                            </div>
+                            <h4 class="font-bold text-slate-900 text-sm">Cargar Precios / Archivo CSV</h4>
+                            <p class="text-xs text-slate-600">Seleccioná un archivo `.csv` descargado desde Google Sheets para actualizar la base de precios local.</p>
+
+                            <div class="pt-2">
+                                <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="handleCSVImport(event)">
+                                <button onclick="document.getElementById('csvFileInput').click()" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition">
+                                    <i class="fa-solid fa-upload"></i> Seleccionar Archivo CSV de Sheets
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- MODAL 1: ADD / EDIT PRODUCT (ACCESORIOS & TECNOLOGÍA) -->
+    <div id="productModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
+            <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
+                <h3 id="productModalTitle" class="font-extrabold text-slate-900 text-base">Cargar Nuevo Producto</h3>
+                <button onclick="closeProductModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="productForm" onsubmit="saveProduct(event)" class="space-y-3 text-xs">
+                <input type="hidden" id="prodId">
+                
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Nombre / Título del Producto *</label>
+                    <input type="text" id="prodTitle" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-brand-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Categoría *</label>
+                        <select id="prodCategory" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                            <option value="fundas">Fundas & Covers</option>
+                            <option value="proteccion">Vidrios Templados</option>
+                            <option value="cargadores">Cargadores & Cables</option>
+                            <option value="audio">Audio & Auriculares</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Marca *</label>
+                        <input type="text" id="prodBrand" placeholder="Apple, Samsung, BE..." required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Stock Actual *</label>
+                        <input type="number" id="prodStock" min="0" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Stock Mínimo</label>
+                        <input type="number" id="prodMinStock" value="3" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Precio Costo ($)</label>
+                        <input type="number" id="prodCost" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Precio de Lista ($) *</label>
+                        <input type="number" id="prodPrice" required min="0" oninput="autoCalcCashPrice()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-emerald-700 mb-1">Efectivo/Transf. (-15%)</label>
+                        <input type="number" id="prodCashPrice" readonly class="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">URL de Imagen (Opcional)</label>
+                    <input type="text" id="prodImage" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                </div>
+
+                <div class="pt-3 flex justify-end gap-2">
+                    <button type="button" onclick="closeProductModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancelar</button>
+                    <button type="submit" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-sm">Guardar Producto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL 2: ADD / EDIT SMARTPHONE UNIT (CELULAR NUEVO O USADO) -->
+    <div id="phoneModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
+            <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
+                <h3 id="phoneModalTitle" class="font-extrabold text-slate-900 text-base">Ingresar Unidad Smartphone</h3>
+                <button onclick="closePhoneModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="phoneForm" onsubmit="savePhoneUnit(event)" class="space-y-3 text-xs">
+                <input type="hidden" id="phoneId">
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Marca *</label>
+                        <select id="phoneBrand" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                            <option value="Apple">Apple iPhone</option>
+                            <option value="Samsung">Samsung Galaxy</option>
+                            <option value="Xiaomi">Xiaomi / Redmi</option>
+                            <option value="Motorola">Motorola</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Modelo Exacto *</label>
+                        <input type="text" id="phoneModel" placeholder="Ej: iPhone 15 Pro Max" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Condición *</label>
+                        <select id="phoneCondition" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                            <option value="Nuevo">Nuevo Sellado</option>
+                            <option value="Usado Excelente">Usado Excelente</option>
+                            <option value="Usado Bueno">Usado Bueno</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Batería (%)</label>
+                        <input type="number" id="phoneBattery" value="100" min="50" max="100" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Capacidad *</label>
+                        <select id="phoneStorage" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                            <option value="64GB">64 GB</option>
+                            <option value="128GB" selected>128 GB</option>
+                            <option value="256GB">256 GB</option>
+                            <option value="512GB">512 GB</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Color *</label>
+                        <input type="text" id="phoneColor" placeholder="Ej: Titanium Black" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Nro Serie / IMEI *</label>
+                        <input type="text" id="phoneImei" placeholder="3589..." required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono-num font-bold">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Precio Efectivo / Transf. ($) *</label>
+                        <input type="number" id="phonePrice" required min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Estado de Ficha</label>
+                        <select id="phoneStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                            <option value="En Stock">En Stock</option>
+                            <option value="Reservado">Reservado</option>
+                            <option value="Vendido">Vendido</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">URL Imagen</label>
+                    <input type="text" id="phoneImage" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                </div>
+
+                <div class="pt-3 flex justify-end gap-2">
+                    <button type="button" onclick="closePhoneModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancelar</button>
+                    <button type="submit" class="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-sm">Guardar Smartphone</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL 3: PRINTABLE TICKET / SALE RECEIPT -->
+    <div id="receiptModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
+            <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
+                <h3 class="font-extrabold text-slate-900 text-base">Comprobante de Venta</h3>
+                <button onclick="closeReceiptModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div id="printableTicketArea" class="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-xs space-y-3 font-mono-num">
+                <div class="text-center space-y-1 border-b border-slate-300 pb-3">
+                    <h2 class="text-base font-black tracking-wider text-slate-900">BE STORE</h2>
+                    <p class="text-[10px] text-slate-500 uppercase">Mobile & Tech Accessories</p>
+                    <p class="text-[10px] text-slate-500">Instagram: @bestoreok</p>
+                    <p id="receiptDate" class="text-[10px] text-slate-400 mt-1"></p>
+                </div>
+
+                <div id="receiptCustomerInfo" class="text-[11px] space-y-0.5 border-b border-slate-300 pb-2">
+                    <!-- Dynamic -->
+                </div>
+
+                <div id="receiptItemsList" class="space-y-1 py-1 border-b border-slate-300">
+                    <!-- Dynamic -->
+                </div>
+
+                <div id="receiptTotals" class="space-y-1 text-right pt-1 font-bold text-slate-900">
+                    <!-- Dynamic -->
+                </div>
+
+                <div class="text-center pt-2 text-[10px] text-slate-500 border-t border-slate-300">
+                    ¡Muchas gracias por tu compra en BE STORE!
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="window.print()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                    <i class="fa-solid fa-print"></i> Imprimir Comprobante
+                </button>
+                <button id="sendReceiptWhatsappBtn" onclick="sendReceiptViaWhatsApp()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                    <i class="fa-brands fa-whatsapp"></i> Enviar por WhatsApp
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+    <script>
+        /* IN-MEMORY DATABASE INITIAL STATE (Aligned with BE STORE Inventory) */
+        let PRODUCTS = [
+            { id: 'ACC-101', title: 'Funda MagSafe Matte Antigolpe iPhone 15 Pro Max', category: 'fundas', brand: 'Apple', stock: 14, minStock: 3, cost: 8500, price: 18500, cashPrice: 15725, image: 'https://images.unsplash.com/photo-1603313011101-320f26a4f6f6?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-102', title: 'Funda Silicone Soft Touch interior Felpa iPhone 13/14', category: 'fundas', brand: 'Apple', stock: 2, minStock: 5, cost: 6000, price: 14500, cashPrice: 12325, image: 'https://images.unsplash.com/photo-1541877944-ac82a091518a?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-103', title: 'Vidrio Templado 9D Curved Full Glue Dureza 9H', category: 'proteccion', brand: 'ALL', stock: 28, minStock: 10, cost: 3200, price: 9500, cashPrice: 8075, image: 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-104', title: 'Vidrio Anti-Espía Privacy 9D Premium', category: 'proteccion', brand: 'ALL', stock: 1, minStock: 5, cost: 4500, price: 12500, cashPrice: 10625, image: 'https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-105', title: 'Cargador Carga Rápida 20W USB-C Power Delivery', category: 'cargadores', brand: 'Apple', stock: 9, minStock: 4, cost: 11000, price: 24500, cashPrice: 20825, image: 'https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-106', title: 'Powerbank Inalámbrico MagSafe 10.000mAh LED', category: 'cargadores', brand: 'Apple', stock: 6, minStock: 2, cost: 24000, price: 48000, cashPrice: 40800, image: 'https://images.unsplash.com/photo-1622445268465-84288046b581?w=400&auto=format&fit=crop&q=80' },
+            { id: 'ACC-107', title: 'Auriculares Bluetooth Air-Pro ANC Canceling', category: 'audio', brand: 'ALL', stock: 5, minStock: 2, cost: 21000, price: 42000, cashPrice: 35700, image: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=400&auto=format&fit=crop&q=80' }
+        ];
+
+        let PHONES = [
+            { id: 'PH-101', brand: 'Apple', model: 'iPhone 15 Pro Max', condition: 'Nuevo', battery: 100, storage: '256GB', color: 'Titanio Natural', imei: '358941092834101', price: 1350000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&auto=format&fit=crop&q=80' },
+            { id: 'PH-102', brand: 'Apple', model: 'iPhone 13', condition: 'Usado Excelente', battery: 89, storage: '128GB', color: 'Midnight', imei: '354812093847122', price: 680000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1632661674596-df8be070a5c5?w=400&auto=format&fit=crop&q=80' },
+            { id: 'PH-103', brand: 'Samsung', model: 'Galaxy S24 Ultra', condition: 'Nuevo', battery: 100, storage: '512GB', color: 'Titanium Gray', imei: '352901293847103', price: 1420000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?w=400&auto=format&fit=crop&q=80' }
+        ];
+
+        let SALES = [];
+
+        let posState = {
+            ticket: [],
+            paymentMethod: 'transfer', // 'transfer' or 'card'
+            selectedCategory: 'ALL'
+        };
+
+        let activeTradeInValuation = 0;
+        let categoryChartInstance = null;
+        let lastCreatedSale = null;
+
+        /* INITIALIZATION ON LOAD */
+        window.onload = function() {
+            loadLocalState();
+            startSystemClock();
+            
+            renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderSalesTable();
+            renderPOSCategories();
+            renderPOSItemsGrid();
+
+            updateCanjeModelOptions();
+        };
+
+        /* CLOCK WIDGET */
+        function startSystemClock() {
+            function tick() {
+                const now = new Date();
+                document.getElementById('clockTime').textContent = now.toLocaleTimeString('es-AR');
+                document.getElementById('clockDate').textContent = now.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            tick();
+            setInterval(tick, 1000);
+        }
+
+        /* NAVIGATION & TAB SWITCHING */
+        function switchTab(tabId) {
+            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'sheets-sync'];
+            
+            tabs.forEach(t => {
+                const navBtn = document.getElementById(`nav-${t}`);
+                const viewSec = document.getElementById(`view-${t}`);
+                if (navBtn) navBtn.classList.remove('active');
+                if (viewSec) viewSec.classList.add('hidden');
+            });
+
+            const activeBtn = document.getElementById(`nav-${tabId}`);
+            const activeSec = document.getElementById(`view-${tabId}`);
+            
+            if (activeBtn) activeBtn.classList.add('active');
+            if (activeSec) activeSec.classList.remove('hidden');
+
+            // Update Header Title
+            const titles = {
+                'dashboard': '<i class="fa-solid fa-chart-pie text-brand-600"></i> Dashboard General',
+                'pos': '<i class="fa-solid fa-cash-register text-emerald-600"></i> Punto de Venta (POS)',
+                'inventory-acc': '<i class="fa-solid fa-boxes-stacked text-brand-accent"></i> Inventario Accesorios & Tech',
+                'inventory-phones': '<i class="fa-solid fa-mobile-screen-button text-purple-600"></i> Stock de Celulares (Nuevos/Usados)',
+                'sales-history': '<i class="fa-solid fa-receipt text-slate-600"></i> Historial de Ventas',
+                'canje-calculator': '<i class="fa-solid fa-arrows-rotate text-emerald-600"></i> Cotizador Plan Canje',
+                'sheets-sync': '<i class="fa-solid fa-file-csv text-emerald-600"></i> Sincronización Google Sheets'
+            };
+            document.getElementById('pageTitle').innerHTML = titles[tabId] || 'BE STORE System';
+
+            if (tabId === 'dashboard') {
+                renderDashboard();
+            } else if (tabId === 'pos') {
+                renderPOSItemsGrid();
+            }
+        }
+
+        /* DASHBOARD RENDERING */
+        function renderDashboard() {
+            // Calculations
+            let accValue = PRODUCTS.reduce((sum, p) => sum + (p.price * p.stock), 0);
+            let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + p.price, 0);
+            let totalValue = accValue + phoneValue;
+
+            let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
+            let newPhones = inStockPhones.filter(p => p.condition === 'Nuevo').length;
+            let usedPhones = inStockPhones.filter(p => p.condition.includes('Usado')).length;
+
+            let lowStockAcc = PRODUCTS.filter(p => p.stock <= p.minStock);
+
+            document.getElementById('dashTotalValue').textContent = `$${totalValue.toLocaleString('es-AR')}`;
+            document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
+            document.getElementById('dashPhonesSub').textContent = `${newPhones} Nuevos / ${usedPhones} Usados`;
+            document.getElementById('dashLowStockCount').textContent = `${lowStockAcc.length} ítems`;
+
+            // Today's Sales
+            const todayStr = new Date().toLocaleDateString('es-AR');
+            const salesToday = SALES.filter(s => s.date.includes(todayStr));
+            const revToday = salesToday.reduce((sum, s) => sum + s.total, 0);
+
+            document.getElementById('dashSalesToday').textContent = `${salesToday.length} oper.`;
+            document.getElementById('dashRevenueToday').textContent = `$${revToday.toLocaleString('es-AR')} facturado`;
+
+            // Badges
+            const badgeLow = document.getElementById('badgeLowStock');
+            if (lowStockAcc.length > 0) {
+                badgeLow.textContent = lowStockAcc.length;
+                badgeLow.classList.remove('hidden');
+            } else {
+                badgeLow.classList.add('hidden');
+            }
+            document.getElementById('badgePhonesCount').textContent = inStockPhones.length;
+
+            // Render Low Stock List
+            const lowStockContainer = document.getElementById('dashLowStockList');
+            if (lowStockAcc.length === 0) {
+                lowStockContainer.innerHTML = `<p class="text-xs text-slate-400 py-4 text-center">No hay productos en nivel crítico de stock.</p>`;
+            } else {
+                lowStockContainer.innerHTML = lowStockAcc.map(item => `
+                    <div class="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 flex items-center justify-between">
+                        <div class="min-w-0 flex-1 pr-2">
+                            <h4 class="text-xs font-bold text-slate-800 truncate">${item.title}</h4>
+                            <span class="text-[10px] text-amber-800 font-semibold">Quedan ${item.stock} un. (Mín: ${item.minStock})</span>
+                        </div>
+                        <button onclick="quickAddStock('${item.id}', 5)" class="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg shrink-0">
+                            +5 Stock
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            renderCategoryChart();
+        }
+
+        function renderCategoryChart() {
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            
+            const catMap = {
+                'fundas': 0,
+                'proteccion': 0,
+                'cargadores': 0,
+                'audio': 0,
+                'celulares': PHONES.filter(p => p.status === 'En Stock').length
+            };
+
+            PRODUCTS.forEach(p => {
+                if (catMap[p.category] !== undefined) {
+                    catMap[p.category] += p.stock;
+                }
+            });
+
+            if (categoryChartInstance) {
+                categoryChartInstance.destroy();
+            }
+
+            categoryChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Fundas', 'Protección', 'Cargadores', 'Audio', 'Celulares'],
+                    datasets: [{
+                        label: 'Unidades en Stock',
+                        data: [catMap.fundas, catMap.proteccion, catMap.cargadores, catMap.audio, catMap.celulares],
+                        backgroundColor: ['#6366f1', '#38bdf8', '#059669', '#a855f7', '#d97706'],
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        /* ACCESSORIES TABLE LOGIC */
+        function renderAccTable() {
+            const body = document.getElementById('accTableBody');
+            const search = document.getElementById('accSearchInput').value.toLowerCase();
+            const cat = document.getElementById('accCategoryFilter').value;
+
+            const filtered = PRODUCTS.filter(p => {
+                const matchesCat = cat === 'ALL' || p.category === cat;
+                const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search);
+                return matchesCat && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                body.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">No se encontraron productos en el inventario.</td></tr>`;
+                return;
+            }
+
+            body.innerHTML = filtered.map(item => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-3.5">
+                        <div class="flex items-center gap-3">
+                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
+                            <div>
+                                <span class="font-bold text-slate-900 block">${item.title}</span>
+                                <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id} | ${item.brand}</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-3.5 capitalize font-medium text-slate-600">${item.category}</td>
+                    <td class="p-3.5">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
+                                ${item.stock} un.
+                            </span>
+                            <div class="flex flex-col gap-0.5">
+                                <button onclick="quickAddStock('${item.id}', 1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">+</button>
+                                <button onclick="quickAddStock('${item.id}', -1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">-</button>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${item.cost.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${item.price.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${item.cashPrice.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 text-center">
+                        <div class="flex items-center justify-center gap-2">
+                            <button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            <button onclick="deleteProduct('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        /* PHONES TABLE LOGIC */
+        function renderPhonesTable() {
+            const body = document.getElementById('phonesTableBody');
+            const search = document.getElementById('phoneSearchInput').value.toLowerCase();
+            const cond = document.getElementById('phoneConditionFilter').value;
+
+            const filtered = PHONES.filter(p => {
+                const matchesCond = cond === 'ALL' || (cond === 'Nuevo' ? p.condition === 'Nuevo' : p.condition.includes('Usado'));
+                const matchesSearch = p.model.toLowerCase().includes(search) || p.imei.toLowerCase().includes(search) || p.color.toLowerCase().includes(search) || p.storage.toLowerCase().includes(search);
+                return matchesCond && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                body.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">No hay smartphones registrados con este criterio.</td></tr>`;
+                return;
+            }
+
+            body.innerHTML = filtered.map(item => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-3.5">
+                        <div class="flex items-center gap-3">
+                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
+                            <div>
+                                <span class="font-bold text-slate-900 block">${item.brand} ${item.model}</span>
+                                <span class="text-[10px] text-slate-400 font-mono-num">ID: ${item.id}</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-3.5">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${item.condition === 'Nuevo' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'}">
+                            ${item.condition}
+                        </span>
+                    </td>
+                    <td class="p-3.5 font-mono-num font-bold text-xs ${item.battery >= 85 ? 'text-emerald-600' : 'text-amber-600'}">
+                        ${item.battery}%
+                    </td>
+                    <td class="p-3.5 font-medium text-slate-700">${item.storage} - ${item.color}</td>
+                    <td class="p-3.5 font-mono-num text-xs font-semibold text-slate-600">${item.imei}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${item.price.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5">
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${item.status === 'En Stock' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600'}">
+                            ${item.status}
+                        </span>
+                    </td>
+                    <td class="p-3.5 text-center">
+                        <div class="flex items-center justify-center gap-2">
+                            ${item.status === 'En Stock' ? `
+                                <button onclick="addPhoneToPOS('${item.id}')" class="p-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold text-xs flex items-center gap-1" title="Vender en Caja">
+                                    <i class="fa-solid fa-cart-plus"></i> Vender
+                                </button>
+                            ` : ''}
+                            <button onclick="editPhone('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        /* POINT OF SALE (POS) TICKET ENGINE */
+        function renderPOSCategories() {
+            const container = document.getElementById('posCategoryPills');
+            const cats = [
+                { id: 'ALL', label: 'Todos los Productos' },
+                { id: 'fundas', label: 'Fundas' },
+                { id: 'proteccion', label: 'Vidrios' },
+                { id: 'cargadores', label: 'Cargadores' },
+                { id: 'audio', label: 'Audio' },
+                { id: 'celulares', label: 'Smartphone Stock' }
+            ];
+
+            container.innerHTML = cats.map(c => `
+                <button 
+                    onclick="setPOSCategory('${c.id}')" 
+                    class="px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition border ${posState.selectedCategory === c.id ? 'bg-emerald-600 text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}"
+                >
+                    ${c.label}
+                </button>
+            `).join('');
+        }
+
+        function setPOSCategory(catId) {
+            posState.selectedCategory = catId;
+            renderPOSCategories();
+            renderPOSItemsGrid();
+        }
+
+        function filterPOSItems() {
+            renderPOSItemsGrid();
+        }
+
+        function renderPOSItemsGrid() {
+            const grid = document.getElementById('posItemsGrid');
+            const search = document.getElementById('posSearchInput').value.toLowerCase();
+            const cat = posState.selectedCategory;
+
+            let itemsList = [];
+
+            if (cat !== 'celulares') {
+                PRODUCTS.forEach(p => {
+                    if ((cat === 'ALL' || p.category === cat) && p.stock > 0) {
+                        if (p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search)) {
+                            itemsList.push({ ...p, type: 'acc' });
+                        }
+                    }
+                });
+            }
+
+            if (cat === 'ALL' || cat === 'celulares') {
+                PHONES.forEach(ph => {
+                    if (ph.status === 'En Stock') {
+                        const title = `${ph.brand} ${ph.model} ${ph.storage} (${ph.condition})`;
+                        if (title.toLowerCase().includes(search) || ph.imei.toLowerCase().includes(search)) {
+                            itemsList.push({
+                                id: ph.id,
+                                title: title,
+                                category: 'celulares',
+                                brand: ph.brand,
+                                price: ph.price,
+                                cashPrice: ph.price,
+                                image: ph.image,
+                                stock: 1,
+                                type: 'phone',
+                                imei: ph.imei
+                            });
+                        }
+                    }
+                });
+            }
+
+            if (itemsList.length === 0) {
+                grid.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 text-xs">No hay productos disponibles en stock con este filtro.</div>`;
+                return;
+            }
+
+            grid.innerHTML = itemsList.map(item => `
+                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white">
+                    <div class="space-y-2">
+                        <div class="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">
+                            <img src="${item.image}" class="w-full h-full object-cover group-hover:scale-105 transition">
+                            <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                ${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block">${item.brand}</span>
+                            <h4 class="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">${item.title}</h4>
+                        </div>
+                    </div>
+                    <div class="pt-2 mt-1 border-t border-bonewhite-border flex items-baseline justify-between">
+                        <span class="text-xs font-extrabold font-mono-num text-slate-900">$${item.price.toLocaleString('es-AR')}</span>
+                        <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">+ Agregar</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addPOSItem(id, type) {
+            let foundItem = null;
+
+            if (type === 'acc') {
+                foundItem = PRODUCTS.find(p => p.id === id);
+            } else if (type === 'phone') {
+                const ph = PHONES.find(p => p.id === id);
+                if (ph) {
+                    foundItem = {
+                        id: ph.id,
+                        title: `${ph.brand} ${ph.model} ${ph.storage} (${ph.condition})`,
+                        price: ph.price,
+                        cashPrice: ph.price,
+                        type: 'phone',
+                        imei: ph.imei,
+                        maxStock: 1
+                    };
+                }
+            }
+
+            if (!foundItem) return;
+
+            const existingIndex = posState.ticket.findIndex(t => t.id === id);
+
+            if (existingIndex > -1) {
+                if (foundItem.type === 'phone') {
+                    showToast("Este celular único ya está cargado en el ticket.");
+                    return;
+                }
+                if (posState.ticket[existingIndex].quantity < foundItem.stock) {
+                    posState.ticket[existingIndex].quantity += 1;
+                } else {
+                    showToast("No hay más unidades en stock disponible.");
+                    return;
+                }
+            } else {
+                posState.ticket.push({
+                    id: foundItem.id,
+                    title: foundItem.title,
+                    price: foundItem.price,
+                    cashPrice: foundItem.cashPrice,
+                    quantity: 1,
+                    type: foundItem.type,
+                    imei: foundItem.imei || null,
+                    maxStock: foundItem.type === 'acc' ? foundItem.stock : 1
+                });
+            }
+
+            renderPOSTicket();
+            showToast(`"${foundItem.title.substring(0, 20)}..." agregado a la caja`);
+        }
+
+        function addPhoneToPOS(phoneId) {
+            switchTab('pos');
+            addPOSItem(phoneId, 'phone');
+        }
+
+        function updatePOSTicketQty(id, delta) {
+            const index = posState.ticket.findIndex(t => t.id === id);
+            if (index > -1) {
+                posState.ticket[index].quantity += delta;
+                if (posState.ticket[index].quantity <= 0) {
+                    posState.ticket.splice(index, 1);
+                }
+            }
+            renderPOSTicket();
+        }
+
+        function clearPOSTicket() {
+            posState.ticket = [];
+            document.getElementById('posCanjeDeduction').value = '';
+            renderPOSTicket();
+        }
+
+        function setPOSPaymentMethod(method) {
+            posState.paymentMethod = method;
+            const btnTransf = document.getElementById('posPayTransfer');
+            const btnCard = document.getElementById('posPayCard');
+
+            if (method === 'transfer') {
+                btnTransf.className = 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition';
+                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            } else {
+                btnCard.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
+                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            }
+
+            calculatePOSTotals();
+        }
+
+        function renderPOSTicket() {
+            const container = document.getElementById('posTicketList');
+
+            if (posState.ticket.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 text-slate-400 space-y-2">
+                        <i class="fa-solid fa-cart-shopping text-3xl text-slate-300"></i>
+                        <p class="text-xs">El ticket de venta está vacío.</p>
+                        <p class="text-[10px]">Haz clic en los productos a la izquierda para sumarlos.</p>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = posState.ticket.map(item => `
+                    <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-xs font-bold text-slate-900 truncate">${item.title}</h4>
+                            <div class="text-[10px] text-slate-500 font-mono-num flex items-center gap-2">
+                                <span>$${item.price.toLocaleString('es-AR')} un.</span>
+                                ${item.imei ? `<span class="bg-slate-200 px-1 rounded text-slate-700">IMEI: ${item.imei}</span>` : ''}
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center gap-2 shrink-0">
+                            ${item.type === 'acc' ? `
+                                <div class="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5">
+                                    <button onclick="updatePOSTicketQty('${item.id}', -1)" class="w-5 h-5 rounded hover:bg-slate-100 text-xs font-bold text-slate-600 flex items-center justify-center">-</button>
+                                    <span class="text-xs font-bold font-mono-num px-1">${item.quantity}</span>
+                                    <button onclick="updatePOSTicketQty('${item.id}', 1)" class="w-5 h-5 rounded hover:bg-slate-100 text-xs font-bold text-slate-600 flex items-center justify-center">+</button>
+                                </div>
+                            ` : `<span class="text-xs font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded">Unidad Única</span>`}
+                            
+                            <button onclick="updatePOSTicketQty('${item.id}', -999)" class="text-slate-400 hover:text-red-600 text-xs p-1">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            calculatePOSTotals();
+        }
+
+        function calculatePOSTotals() {
+            let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            let discountRow = document.getElementById('posDiscountRow');
+            let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
+
+            let discount = posState.paymentMethod === 'transfer' ? Math.round(subtotal * 0.15) : 0;
+
+            if (discount > 0) {
+                discountRow.classList.remove('hidden');
+                document.getElementById('posDiscount').textContent = `-$${discount.toLocaleString('es-AR')}`;
+            } else {
+                discountRow.classList.add('hidden');
+            }
+
+            let finalTotal = Math.max(0, subtotal - discount - canjeVal);
+
+            document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
+            document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
+        }
+
+        function processPOSCheckout() {
+            if (posState.ticket.length === 0) {
+                showToast("Cargá al menos un producto al ticket antes de cobrar.");
+                return;
+            }
+
+            const customerName = document.getElementById('posCustomerName').value.trim() || 'Cliente Mostrador';
+            const customerPhone = document.getElementById('posCustomerPhone').value.trim() || '-';
+            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
+
+            let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            let discount = posState.paymentMethod === 'transfer' ? Math.round(subtotal * 0.15) : 0;
+            let total = Math.max(0, subtotal - discount - canjeVal);
+
+            // Deduct Stock
+            posState.ticket.forEach(tItem => {
+                if (tItem.type === 'acc') {
+                    const acc = PRODUCTS.find(p => p.id === tItem.id);
+                    if (acc) acc.stock = Math.max(0, acc.stock - tItem.quantity);
+                } else if (tItem.type === 'phone') {
+                    const phone = PHONES.find(p => p.id === tItem.id);
+                    if (phone) phone.status = 'Vendido';
+                }
+            });
+
+            // Record Sale Transaction
+            const saleRecord = {
+                id: `TK-${Date.now().toString().slice(-5)}`,
+                date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
+                customerName: customerName,
+                customerPhone: customerPhone,
+                items: [...posState.ticket],
+                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : 'Tarjeta/Cuotas',
+                canjeDeduction: canjeVal,
+                discount: discount,
+                subtotal: subtotal,
+                total: total
+            };
+
+            SALES.unshift(saleRecord);
+            lastCreatedSale = saleRecord;
+            saveLocalState();
+
+            // Refresh UI
+            renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderSalesTable();
+            renderPOSItemsGrid();
+
+            openReceiptModal(saleRecord);
+            clearPOSTicket();
+            showToast("¡Venta finalizada y registrada correctamente!");
+        }
+
+        /* SALES HISTORY TABLE */
+        function renderSalesTable() {
+            const body = document.getElementById('salesTableBody');
+
+            if (SALES.length === 0) {
+                body.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-400">Aún no hay ventas registradas en el sistema.</td></tr>`;
+                return;
+            }
+
+            body.innerHTML = SALES.map(sale => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-3.5">
+                        <span class="font-bold text-slate-900 block font-mono-num">${sale.id}</span>
+                        <span class="text-[10px] text-slate-400">${sale.date}</span>
+                    </td>
+                    <td class="p-3.5 font-medium text-slate-800">
+                        ${sale.customerName}
+                        ${sale.customerPhone !== '-' ? `<span class="block text-[10px] text-slate-400">${sale.customerPhone}</span>` : ''}
+                    </td>
+                    <td class="p-3.5">
+                        <div class="text-xs space-y-0.5">
+                            ${sale.items.map(i => `<div class="text-slate-700">${i.quantity}x ${i.title}</div>`).join('')}
+                        </div>
+                    </td>
+                    <td class="p-3.5 font-semibold text-slate-700">${sale.paymentMethod}</td>
+                    <td class="p-3.5 font-bold font-mono-num text-emerald-600">$${sale.total.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 text-center">
+                        <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
+                            <i class="fa-solid fa-receipt"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function reprintReceipt(saleId) {
+            const sale = SALES.find(s => s.id === saleId);
+            if (sale) openReceiptModal(sale);
+        }
+
+        function openReceiptModal(sale) {
+            document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | Ticket: ${sale.id}`;
+            document.getElementById('receiptCustomerInfo').innerHTML = `
+                <div><strong>Cliente:</strong> ${sale.customerName}</div>
+                ${sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
+                <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
+            `;
+
+            document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
+                <div class="flex justify-between text-slate-800">
+                    <span>${i.quantity}x ${i.title}</span>
+                    <span>$${(i.price * i.quantity).toLocaleString('es-AR')}</span>
+                </div>
+            `).join('');
+
+            let totalsHTML = `<div>Subtotal: $${sale.subtotal.toLocaleString('es-AR')}</div>`;
+            if (sale.discount > 0) totalsHTML += `<div class="text-emerald-700">Descuento Contado: -$${sale.discount.toLocaleString('es-AR')}</div>`;
+            if (sale.canjeDeduction > 0) totalsHTML += `<div class="text-amber-700">Plan Canje: -$${sale.canjeDeduction.toLocaleString('es-AR')}</div>`;
+            totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
+
+            document.getElementById('receiptTotals').innerHTML = totalsHTML;
+            document.getElementById('receiptModal').classList.remove('hidden');
+        }
+
+        function closeReceiptModal() {
+            document.getElementById('receiptModal').classList.add('hidden');
+        }
+
+        function sendReceiptViaWhatsApp() {
+            if (!lastCreatedSale) return;
+
+            let msg = `🧾 *BE STORE - COMPROBANTE DE COMPRA*\n`;
+            msg += `N° Ticket: *${lastCreatedSale.id}*\nFecha: ${lastCreatedSale.date}\nCliente: ${lastCreatedSale.customerName}\n\n`;
+            msg += `*Detalle de Productos:*\n`;
+            
+            lastCreatedSale.items.forEach((item, index) => {
+                msg += `${index + 1}. ${item.quantity}x ${item.title} - $${(item.price * item.quantity).toLocaleString('es-AR')}\n`;
+            });
+
+            msg += `\n💰 *Total Pagado:* *$${lastCreatedSale.total.toLocaleString('es-AR')}*\n`;
+            msg += `Medio de Pago: ${lastCreatedSale.paymentMethod}\n\n¡Gracias por elegir BE STORE! @bestoreok`;
+
+            window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+        }
+
+        /* PLAN CANJE ENGINE */
+        const CANJE_RATES = {
+            'Apple': [
+                { model: 'iPhone 14 Pro Max', base: 850000 },
+                { model: 'iPhone 14 Pro', base: 750000 },
+                { model: 'iPhone 14', base: 580000 },
+                { model: 'iPhone 13 Pro Max', base: 620000 },
+                { model: 'iPhone 13', base: 480000 },
+                { model: 'iPhone 12 Pro', base: 410000 },
+                { model: 'iPhone 12', base: 340000 },
+                { model: 'iPhone 11', base: 260000 }
+            ],
+            'Samsung': [
+                { model: 'Galaxy S23 Ultra', base: 720000 },
+                { model: 'Galaxy S22 Ultra', base: 510000 },
+                { model: 'Galaxy S21 FE', base: 280000 }
+            ]
+        };
+
+        function updateCanjeModelOptions() {
+            const brand = document.getElementById('canjeBrandSelect').value;
+            const modelSelect = document.getElementById('canjeModelSelect');
+            modelSelect.innerHTML = '';
+
+            if (CANJE_RATES[brand]) {
+                CANJE_RATES[brand].forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.model;
+                    opt.textContent = m.model;
+                    modelSelect.appendChild(opt);
+                });
+            }
+        }
+
+        function calculateTradeInValue() {
+            const brand = document.getElementById('canjeBrandSelect').value;
+            const model = document.getElementById('canjeModelSelect').value;
+            const storage = document.getElementById('canjeStorageSelect').value;
+            const condition = document.getElementById('canjeConditionSelect').value;
+            const battery = parseInt(document.getElementById('canjeBatteryInput').value) || 85;
+
+            const list = CANJE_RATES[brand] || [];
+            const item = list.find(m => m.model === model);
+            
+            let baseVal = item ? item.base : 200000;
+
+            if (storage === '256GB') baseVal *= 1.08;
+            if (storage === '512GB') baseVal *= 1.15;
+
+            if (condition === 'Bueno') baseVal *= 0.90;
+            if (condition === 'Detalles') baseVal *= 0.80;
+
+            if (battery < 80) baseVal *= 0.88;
+            else if (battery < 85) baseVal *= 0.94;
+
+            activeTradeInValuation = Math.round(baseVal / 1000) * 1000;
+
+            document.getElementById('canjeValuationResult').textContent = `$${activeTradeInValuation.toLocaleString('es-AR')}`;
+            document.getElementById('canjeResultCard').classList.remove('hidden');
+        }
+
+        function applyCanjeToPOS() {
+            if (activeTradeInValuation <= 0) return;
+            switchTab('pos');
+            document.getElementById('posCanjeDeduction').value = activeTradeInValuation;
+            calculatePOSTotals();
+            showToast(`¡$${activeTradeInValuation.toLocaleString('es-AR')} cargados como descuento de Canje en Caja!`);
+        }
+
+        function intakeUsedPhoneFromCanje() {
+            if (activeTradeInValuation <= 0) return;
+            const brand = document.getElementById('canjeBrandSelect').value;
+            const model = document.getElementById('canjeModelSelect').value;
+            const storage = document.getElementById('canjeStorageSelect').value;
+            const condition = document.getElementById('canjeConditionSelect').value;
+            const battery = parseInt(document.getElementById('canjeBatteryInput').value) || 85;
+
+            // Pre-fill phone modal
+            openPhoneModal();
+            document.getElementById('phoneBrand').value = brand;
+            document.getElementById('phoneModel').value = model;
+            document.getElementById('phoneCondition').value = `Usado ${condition}`;
+            document.getElementById('phoneBattery').value = battery;
+            document.getElementById('phoneStorage').value = storage;
+            document.getElementById('phonePrice').value = Math.round(activeTradeInValuation * 1.25);
+            showToast("Ficha de Smartphone pre-completada con la cotización.");
+        }
+
+        /* MODAL CRUD OPERATIONS FOR ACCESSORIES */
+        function openProductModal() {
+            document.getElementById('productForm').reset();
+            document.getElementById('prodId').value = '';
+            document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
+            document.getElementById('productModal').classList.remove('hidden');
+        }
+
+        function closeProductModal() {
+            document.getElementById('productModal').classList.add('hidden');
+        }
+
+        function autoCalcCashPrice() {
+            const listPrice = parseFloat(document.getElementById('prodPrice').value) || 0;
+            document.getElementById('prodCashPrice').value = Math.round(listPrice * 0.85);
+        }
+
+        function saveProduct(e) {
+            e.preventDefault();
+            const id = document.getElementById('prodId').value || `ACC-${Date.now().toString().slice(-4)}`;
+            const title = document.getElementById('prodTitle').value;
+            const category = document.getElementById('prodCategory').value;
+            const brand = document.getElementById('prodBrand').value;
+            const stock = parseInt(document.getElementById('prodStock').value) || 0;
+            const minStock = parseInt(document.getElementById('prodMinStock').value) || 3;
+            const cost = parseFloat(document.getElementById('prodCost').value) || 0;
+            const price = parseFloat(document.getElementById('prodPrice').value) || 0;
+            const cashPrice = Math.round(price * 0.85);
+            const image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
+
+            const existingIndex = PRODUCTS.findIndex(p => p.id === id);
+            const productObj = { id, title, category, brand, stock, minStock, cost, price, cashPrice, image };
+
+            if (existingIndex > -1) {
+                PRODUCTS[existingIndex] = productObj;
+                showToast("Producto actualizado exitosamente.");
+            } else {
+                PRODUCTS.push(productObj);
+                showToast("Nuevo producto cargado al inventario.");
+            }
+
+            saveLocalState();
+            renderDashboard();
+            renderAccTable();
+            closeProductModal();
+        }
+
+        function editProduct(id) {
+            const p = PRODUCTS.find(item => item.id === id);
+            if (!p) return;
+
+            document.getElementById('prodId').value = p.id;
+            document.getElementById('prodTitle').value = p.title;
+            document.getElementById('prodCategory').value = p.category;
+            document.getElementById('prodBrand').value = p.brand;
+            document.getElementById('prodStock').value = p.stock;
+            document.getElementById('prodMinStock').value = p.minStock;
+            document.getElementById('prodCost').value = p.cost;
+            document.getElementById('prodPrice').value = p.price;
+            document.getElementById('prodCashPrice').value = p.cashPrice;
+            document.getElementById('prodImage').value = p.image;
+
+            document.getElementById('productModalTitle').textContent = 'Editar Producto';
+            document.getElementById('productModal').classList.remove('hidden');
+        }
+
+        function deleteProduct(id) {
+            PRODUCTS = PRODUCTS.filter(p => p.id !== id);
+            saveLocalState();
+            renderDashboard();
+            renderAccTable();
+            showToast("Producto eliminado del inventario.");
+        }
+
+        function quickAddStock(id, amount) {
+            const p = PRODUCTS.find(item => item.id === id);
+            if (p) {
+                p.stock = Math.max(0, p.stock + amount);
+                saveLocalState();
+                renderDashboard();
+                renderAccTable();
+                showToast(`Stock actualizado para ${p.title}`);
+            }
+        }
+
+        /* MODAL CRUD OPERATIONS FOR PHONES */
+        function openPhoneModal() {
+            document.getElementById('phoneForm').reset();
+            document.getElementById('phoneId').value = '';
+            document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
+            document.getElementById('phoneModal').classList.remove('hidden');
+        }
+
+        function closePhoneModal() {
+            document.getElementById('phoneModal').classList.add('hidden');
+        }
+
+        function savePhoneUnit(e) {
+            e.preventDefault();
+            const id = document.getElementById('phoneId').value || `PH-${Date.now().toString().slice(-4)}`;
+            const brand = document.getElementById('phoneBrand').value;
+            const model = document.getElementById('phoneModel').value;
+            const condition = document.getElementById('phoneCondition').value;
+            const battery = parseInt(document.getElementById('phoneBattery').value) || 100;
+            const storage = document.getElementById('phoneStorage').value;
+            const color = document.getElementById('phoneColor').value;
+            const imei = document.getElementById('phoneImei').value;
+            const price = parseFloat(document.getElementById('phonePrice').value) || 0;
+            const status = document.getElementById('phoneStatus').value;
+            const image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
+
+            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, status, image };
+            const existingIndex = PHONES.findIndex(p => p.id === id);
+
+            if (existingIndex > -1) {
+                PHONES[existingIndex] = phoneObj;
+                showToast("Ficha de smartphone actualizada.");
+            } else {
+                PHONES.push(phoneObj);
+                showToast("Smartphone registrado en el stock.");
+            }
+
+            saveLocalState();
+            renderDashboard();
+            renderPhonesTable();
+            closePhoneModal();
+        }
+
+        function editPhone(id) {
+            const ph = PHONES.find(item => item.id === id);
+            if (!ph) return;
+
+            document.getElementById('phoneId').value = ph.id;
+            document.getElementById('phoneBrand').value = ph.brand;
+            document.getElementById('phoneModel').value = ph.model;
+            document.getElementById('phoneCondition').value = ph.condition;
+            document.getElementById('phoneBattery').value = ph.battery;
+            document.getElementById('phoneStorage').value = ph.storage;
+            document.getElementById('phoneColor').value = ph.color;
+            document.getElementById('phoneImei').value = ph.imei;
+            document.getElementById('phonePrice').value = ph.price;
+            document.getElementById('phoneStatus').value = ph.status;
+            document.getElementById('phoneImage').value = ph.image;
+
+            document.getElementById('phoneModalTitle').textContent = 'Editar Unidad Smartphone';
+            document.getElementById('phoneModal').classList.remove('hidden');
+        }
+
+        /* GOOGLE SHEETS CSV EXPORT & IMPORT ENGINE */
+        function exportStockCSV() {
+            let csv = "ID,Nombre,Categoria,Marca,Stock,StockMin,Costo,PrecioLista,PrecioEfectivo\n";
+            PRODUCTS.forEach(p => {
+                csv += `"${p.id}","${p.title}","${p.category}","${p.brand}",${p.stock},${p.minStock},${p.cost},${p.price},${p.cashPrice}\n`;
+            });
+
+            PHONES.forEach(ph => {
+                csv += `"${ph.id}","${ph.brand} ${ph.model} (${ph.condition})","celulares","${ph.brand}",1,1,0,${ph.price},${ph.price}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `BE_STORE_Stock_${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            showToast("Archivo CSV exportado listo para Google Sheets.");
+        }
+
+        function exportSalesCSV() {
+            let csv = "TicketID,Fecha,Cliente,Telefono,MedioPago,Total\n";
+            SALES.forEach(s => {
+                csv += `"${s.id}","${s.date}","${s.customerName}","${s.customerPhone}","${s.paymentMethod}",${s.total}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `BE_STORE_Ventas_${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            showToast("Reporte de Ventas descargado en CSV.");
+        }
+
+        function handleCSVImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split('\n');
+                let importedCount = 0;
+
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    const parts = lines[i].split(',').map(s => s.replace(/^"|"$/g, '').trim());
+                    if (parts.length >= 8) {
+                        const [id, title, category, brand, stock, minStock, cost, price] = parts;
+                        const pCost = parseFloat(cost) || 0;
+                        const pPrice = parseFloat(price) || 0;
+                        const pCash = Math.round(pPrice * 0.85);
+
+                        const existing = PRODUCTS.find(p => p.id === id);
+                        if (existing) {
+                            existing.price = pPrice;
+                            existing.cashPrice = pCash;
+                            existing.stock = parseInt(stock) || existing.stock;
+                        } else {
+                            PRODUCTS.push({
+                                id: id || `ACC-${Date.now().toString().slice(-4)}`,
+                                title: title || 'Producto Importado',
+                                category: category || 'fundas',
+                                brand: brand || 'Genérico',
+                                stock: parseInt(stock) || 5,
+                                minStock: parseInt(minStock) || 2,
+                                cost: pCost,
+                                price: pPrice,
+                                cashPrice: pCash,
+                                image: 'https://placehold.co/400x400/1e293b/ffffff?text=Sheets+Sync'
+                            });
+                        }
+                        importedCount++;
+                    }
+                }
+
+                saveLocalState();
+                renderDashboard();
+                renderAccTable();
+                showToast(`¡Se actualizaron ${importedCount} productos desde Google Sheets!`);
+            };
+            reader.readAsText(file);
+        }
+
+        /* LOCALSTORAGE PERSISTENCE */
+        function saveLocalState() {
+            localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
+            localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
+            localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+        }
+
+        function loadLocalState() {
+            const p = localStorage.getItem('bestore_internal_products');
+            const ph = localStorage.getItem('bestore_internal_phones');
+            const s = localStorage.getItem('bestore_internal_sales');
+
+            if (p) try { PRODUCTS = JSON.parse(p); } catch(e){}
+            if (ph) try { PHONES = JSON.parse(ph); } catch(e){}
+            if (s) try { SALES = JSON.parse(s); } catch(e){}
+        }
+
+        /* TOAST NOTIFICATION HELPERS */
+        function showToast(message) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'bg-slate-900 border border-slate-700 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 transform translate-y-4 opacity-0 transition duration-300 pointer-events-auto';
+            toast.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i> ${message}`;
+            
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-4', 'opacity-0');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
