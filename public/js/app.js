@@ -50,25 +50,13 @@ let CATEGORIES = [
     { id: 'audio', name: 'Audio & Auriculares' }
 ];
 const CARD_SURCHARGE = 0.10;
+const DATA_VERSION = 2;
 
-/* IN-MEMORY DATABASE INITIAL STATE (Aligned with BE STORE Inventory) */
-        let PRODUCTS = [
-            { id: 'ACC-101', title: 'Funda MagSafe Matte Antigolpe iPhone 15 Pro Max', category: 'fundas', brand: 'Apple', stock: 14, minStock: 3, cost: 8500, price: 18500, cashPrice: 15725, image: 'https://images.unsplash.com/photo-1603313011101-320f26a4f6f6?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-102', title: 'Funda Silicone Soft Touch interior Felpa iPhone 13/14', category: 'fundas', brand: 'Apple', stock: 2, minStock: 5, cost: 6000, price: 14500, cashPrice: 12325, image: 'https://images.unsplash.com/photo-1541877944-ac82a091518a?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-103', title: 'Vidrio Templado 9D Curved Full Glue Dureza 9H', category: 'proteccion', brand: 'ALL', stock: 28, minStock: 10, cost: 3200, price: 9500, cashPrice: 8075, image: 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-104', title: 'Vidrio Anti-Espía Privacy 9D Premium', category: 'proteccion', brand: 'ALL', stock: 1, minStock: 5, cost: 4500, price: 12500, cashPrice: 10625, image: 'https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-105', title: 'Cargador Carga Rápida 20W USB-C Power Delivery', category: 'cargadores', brand: 'Apple', stock: 9, minStock: 4, cost: 11000, price: 24500, cashPrice: 20825, image: 'https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-106', title: 'Powerbank Inalámbrico MagSafe 10.000mAh LED', category: 'cargadores', brand: 'Apple', stock: 6, minStock: 2, cost: 24000, price: 48000, cashPrice: 40800, image: 'https://images.unsplash.com/photo-1622445268465-84288046b581?w=400&auto=format&fit=crop&q=80' },
-            { id: 'ACC-107', title: 'Auriculares Bluetooth Air-Pro ANC Canceling', category: 'audio', brand: 'ALL', stock: 5, minStock: 2, cost: 21000, price: 42000, cashPrice: 35700, image: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=400&auto=format&fit=crop&q=80' }
-        ];
-
-        let PHONES = [
-            { id: 'PH-101', brand: 'Apple', model: 'iPhone 15 Pro Max', condition: 'Nuevo', battery: 100, storage: '256GB', color: 'Titanio Natural', imei: '358941092834101', price: 1350000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&auto=format&fit=crop&q=80' },
-            { id: 'PH-102', brand: 'Apple', model: 'iPhone 13', condition: 'Usado Excelente', battery: 89, storage: '128GB', color: 'Midnight', imei: '354812093847122', price: 680000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1632661674596-df8be070a5c5?w=400&auto=format&fit=crop&q=80' },
-            { id: 'PH-103', brand: 'Samsung', model: 'Galaxy S24 Ultra', condition: 'Nuevo', battery: 100, storage: '512GB', color: 'Titanium Gray', imei: '352901293847103', price: 1420000, status: 'En Stock', image: 'https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?w=400&auto=format&fit=crop&q=80' }
-        ];
-
+/* Empty initial state: inventory is entered manually by an administrator. */
+        let PRODUCTS = [];
+        let PHONES = [];
         let SALES = [];
+        let CLIENTS = [];
 
         let posState = {
             ticket: [],
@@ -82,6 +70,10 @@ const CARD_SURCHARGE = 0.10;
 
         /* INITIALIZATION ON LOAD */
         window.onload = async function() {
+            await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+            firebase.auth().onAuthStateChanged(async user => {
+                if (user && !currentUserProfile) await finishLogin(user);
+            });
             await initializeAuthentication();
         };
 
@@ -129,6 +121,7 @@ const CARD_SURCHARGE = 0.10;
             const profile = await db.collection('users').doc(user.uid).get();
             if (!profile.exists) throw new Error('Usuario sin perfil asignado.');
             currentUserProfile = profile.data();
+            document.getElementById('currentUserName').textContent = `${currentUserProfile.nick} (${currentUserProfile.role === 'admin' ? 'Admin' : 'Vendedor'})`;
             document.getElementById('authScreen').classList.add('hidden');
             await loadLocalState();
             normalizeCommercialData();
@@ -140,6 +133,8 @@ const CARD_SURCHARGE = 0.10;
             renderPOSCategories();
             renderPOSItemsGrid();
             renderCategorySelects();
+            renderCategoriesPage();
+            renderClients();
             updateCanjeModelOptions();
         }
 
@@ -154,6 +149,12 @@ const CARD_SURCHARGE = 0.10;
         function requireAdmin() {
             if (!isAdmin()) showToast('Solo un administrador puede realizar esta acción.');
             return isAdmin();
+        }
+
+        async function logoutUser() {
+            await firebase.auth().signOut();
+            currentUserProfile = null;
+            document.getElementById('authScreen').classList.remove('hidden');
         }
 
         function openUserModal() {
@@ -174,20 +175,21 @@ const CARD_SURCHARGE = 0.10;
             }).join('');
         }
 
-        async function createSeller(event) {
+        async function createUser(event) {
             event.preventDefault();
             if (!requireAdmin()) return;
-            const nick = document.getElementById('sellerNick').value.trim();
-            const password = document.getElementById('sellerPassword').value;
+            const nick = document.getElementById('newUserNick').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            const role = document.getElementById('newUserRole').value;
             const secondaryApp = firebase.initializeApp(firebaseConfig, `seller-${Date.now()}`);
             try {
                 const credential = await secondaryApp.auth().createUserWithEmailAndPassword(nickEmail(nick), password);
-                await db.collection('users').doc(credential.user.uid).set({ nick, role: 'seller', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-                document.getElementById('sellerNick').value = '';
-                document.getElementById('sellerPassword').value = '';
+                await db.collection('users').doc(credential.user.uid).set({ nick, role, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                document.getElementById('newUserNick').value = '';
+                document.getElementById('newUserPassword').value = '';
                 await secondaryApp.delete();
                 await renderUserList();
-                showToast('Vendedor registrado correctamente.');
+                showToast('Usuario registrado correctamente.');
             } catch (error) {
                 await secondaryApp.delete();
                 showToast(error.code === 'auth/email-already-in-use' ? 'Ese nick ya está registrado.' : 'No se pudo registrar el vendedor.');
@@ -207,7 +209,7 @@ const CARD_SURCHARGE = 0.10;
 
         /* NAVIGATION & TAB SWITCHING */
         function switchTab(tabId) {
-            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'sheets-sync'];
+            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients'];
             
             tabs.forEach(t => {
                 const navBtn = document.getElementById(`nav-${t}`);
@@ -230,7 +232,6 @@ const CARD_SURCHARGE = 0.10;
                 'inventory-phones': '<i class="fa-solid fa-mobile-screen-button text-purple-600"></i> Stock de Celulares (Nuevos/Usados)',
                 'sales-history': '<i class="fa-solid fa-receipt text-slate-600"></i> Historial de Ventas',
                 'canje-calculator': '<i class="fa-solid fa-arrows-rotate text-emerald-600"></i> Cotizador Plan Canje',
-                'sheets-sync': '<i class="fa-solid fa-file-csv text-emerald-600"></i> Sincronización Google Sheets'
             };
             document.getElementById('pageTitle').innerHTML = titles[tabId] || 'BE STORE System';
 
@@ -238,6 +239,10 @@ const CARD_SURCHARGE = 0.10;
                 renderDashboard();
             } else if (tabId === 'pos') {
                 renderPOSItemsGrid();
+            } else if (tabId === 'categories') {
+                renderCategoriesPage();
+            } else if (tabId === 'clients') {
+                renderClients();
             }
         }
 
@@ -364,7 +369,7 @@ const CARD_SURCHARGE = 0.10;
             }
 
             body.innerHTML = filtered.map(item => `
-                <tr class="hover:bg-slate-50 transition">
+                <tr class="hover:bg-slate-50 transition ${item.status === 'Vendido' ? 'opacity-50 bg-slate-100' : ''}">
                     <td class="p-3.5">
                         <div class="flex items-center gap-3">
                             <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
@@ -454,9 +459,11 @@ const CARD_SURCHARGE = 0.10;
                                     <i class="fa-solid fa-cart-plus"></i> Vender
                                 </button>
                             ` : ''}
-                            <button onclick="editPhone('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs">
+                            ${item.status === 'En Stock' ? `<button onclick="markPhoneSold('${item.id}')" class="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs" title="Marcar vendido"><i class="fa-solid fa-check"></i></button>` : ''}
+                            <button onclick="editPhone('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
+                            <button onclick="deletePhone('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>
@@ -466,21 +473,14 @@ const CARD_SURCHARGE = 0.10;
         /* POINT OF SALE (POS) TICKET ENGINE */
         function renderPOSCategories() {
             const container = document.getElementById('posCategoryPills');
-            const cats = [
-                { id: 'ALL', label: 'Todos los Productos' },
-                { id: 'fundas', label: 'Fundas' },
-                { id: 'proteccion', label: 'Vidrios' },
-                { id: 'cargadores', label: 'Cargadores' },
-                { id: 'audio', label: 'Audio' },
-                { id: 'celulares', label: 'Smartphone Stock' }
-            ];
+            const cats = [{ id: 'ALL', label: 'Todos los Productos' }, ...CATEGORIES, { id: 'celulares', label: 'Smartphone Stock' }];
 
             container.innerHTML = cats.map(c => `
                 <button 
                     onclick="setPOSCategory('${c.id}')" 
                     class="px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition border ${posState.selectedCategory === c.id ? 'bg-emerald-600 text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}"
                 >
-                    ${c.label}
+                    ${c.name || c.label}
                 </button>
             `).join('');
         }
@@ -751,6 +751,12 @@ const CARD_SURCHARGE = 0.10;
             };
 
             SALES.unshift(saleRecord);
+            let client = CLIENTS.find(item => item.name.toLowerCase() === customerName.toLowerCase());
+            if (!client && customerName !== 'Cliente Mostrador') {
+                client = { id: `CLI-${Date.now()}`, name: customerName, phone: customerPhone === '-' ? '' : customerPhone, email: '', purchaseCount: 0 };
+                CLIENTS.push(client);
+            }
+            if (client) client.purchaseCount = (client.purchaseCount || 0) + 1;
             lastCreatedSale = saleRecord;
             saveLocalState();
 
@@ -896,6 +902,55 @@ const CARD_SURCHARGE = 0.10;
                 });
                 if ([...select.options].some(option => option.value === current)) select.value = current;
             });
+        }
+
+        function renderCategoriesPage() {
+            const container = document.getElementById('categoriesPageList');
+            if (!container) return;
+            const sort = document.getElementById('categorySort')?.value || 'name';
+            const categories = [...CATEGORIES].sort((a, b) => {
+                const countA = PRODUCTS.filter(product => product.category === a.id).length;
+                const countB = PRODUCTS.filter(product => product.category === b.id).length;
+                return sort === 'count' ? countB - countA || a.name.localeCompare(b.name) : a.name.localeCompare(b.name);
+            });
+            container.innerHTML = categories.map(category => `
+                <div class="custom-card p-5"><div class="flex items-center justify-between"><h4 class="font-bold text-slate-900">${category.name}</h4><span class="bg-brand-50 text-brand-700 rounded-full px-2 py-1 text-xs font-bold">${PRODUCTS.filter(product => product.category === category.id).length} productos</span></div></div>
+            `).join('');
+        }
+
+        function renderClients() {
+            const body = document.getElementById('clientsTableBody');
+            if (!body) return;
+            document.getElementById('clientsOptions').innerHTML = CLIENTS.map(client => `<option value="${client.name}">`).join('');
+            body.innerHTML = CLIENTS.map(client => `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${client.phone || '-'}${client.email ? ` · ${client.email}` : ''}</td><td class="p-3">${client.purchaseCount || 0}</td></tr>`).join('') || '<tr><td colspan="3" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
+        }
+
+        async function saveClient(event) {
+            event.preventDefault();
+            const client = { id: `CLI-${Date.now()}`, name: document.getElementById('clientName').value.trim(), phone: document.getElementById('clientPhone').value.trim(), email: document.getElementById('clientEmail').value.trim(), purchaseCount: 0 };
+            CLIENTS.push(client);
+            await saveLocalState();
+            event.target.reset();
+            renderClients();
+            showToast('Cliente registrado correctamente.');
+        }
+
+        async function markPhoneSold(id) {
+            if (!requireAdmin()) return;
+            const phone = PHONES.find(item => item.id === id);
+            if (!phone) return;
+            phone.status = 'Vendido';
+            await saveLocalState();
+            renderPhonesTable();
+            renderDashboard();
+        }
+
+        async function deletePhone(id) {
+            if (!requireAdmin()) return;
+            PHONES = PHONES.filter(item => item.id !== id);
+            await saveLocalState();
+            renderPhonesTable();
+            renderDashboard();
         }
 
         function openCategoryModal() {
@@ -1148,102 +1203,22 @@ const CARD_SURCHARGE = 0.10;
             document.getElementById('phoneModal').classList.remove('hidden');
         }
 
-        /* GOOGLE SHEETS CSV EXPORT & IMPORT ENGINE */
-        function exportStockCSV() {
-            let csv = "ID,Nombre,Categoria,Marca,Stock,StockMin,Costo,PrecioLista,PrecioEfectivo\n";
-            PRODUCTS.forEach(p => {
-                csv += `"${p.id}","${p.title}","${p.category}","${p.brand}",${p.stock},${p.minStock},${p.cost},${p.price},${p.cashPrice}\n`;
-            });
-
-            PHONES.forEach(ph => {
-                csv += `"${ph.id}","${ph.brand} ${ph.model} (${ph.condition})","celulares","${ph.brand}",1,1,0,${ph.price},${ph.price}\n`;
-            });
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `BE_STORE_Stock_${new Date().toISOString().slice(0, 10)}.csv`;
-            link.click();
-            showToast("Archivo CSV exportado listo para Google Sheets.");
-        }
-
-        function exportSalesCSV() {
-            let csv = "TicketID,Fecha,Cliente,Telefono,MedioPago,Total\n";
-            SALES.forEach(s => {
-                csv += `"${s.id}","${s.date}","${s.customerName}","${s.customerPhone}","${s.paymentMethod}",${s.total}\n`;
-            });
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `BE_STORE_Ventas_${new Date().toISOString().slice(0, 10)}.csv`;
-            link.click();
-            showToast("Reporte de Ventas descargado en CSV.");
-        }
-
-        function handleCSVImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                const lines = text.split('\n');
-                let importedCount = 0;
-
-                for (let i = 1; i < lines.length; i++) {
-                    if (!lines[i].trim()) continue;
-                    const parts = lines[i].split(',').map(s => s.replace(/^"|"$/g, '').trim());
-                    if (parts.length >= 8) {
-                        const [id, title, category, brand, stock, minStock, cost, price] = parts;
-                        const pCost = parseFloat(cost) || 0;
-                        const pPrice = parseFloat(price) || 0;
-                        const pCash = pPrice;
-
-                        const existing = PRODUCTS.find(p => p.id === id);
-                        if (existing) {
-                            existing.price = pPrice;
-                            existing.cashPrice = pCash;
-                            existing.stock = parseInt(stock) || existing.stock;
-                        } else {
-                            PRODUCTS.push({
-                                id: id || `ACC-${Date.now().toString().slice(-4)}`,
-                                title: title || 'Producto Importado',
-                                category: category || 'fundas',
-                                brand: brand || 'Genérico',
-                                stock: parseInt(stock) || 5,
-                                minStock: parseInt(minStock) || 2,
-                                cost: pCost,
-                                price: pPrice,
-                                cashPrice: pCash,
-                                image: 'https://placehold.co/400x400/1e293b/ffffff?text=Sheets+Sync'
-                            });
-                        }
-                        importedCount++;
-                    }
-                }
-
-                saveLocalState();
-                renderDashboard();
-                renderAccTable();
-                showToast(`¡Se actualizaron ${importedCount} productos desde Google Sheets!`);
-            };
-            reader.readAsText(file);
-        }
-
         /* FIRESTORE + LOCAL FALLBACK PERSISTENCE */
         async function saveLocalState() {
             localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+            localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
 
             if (!firebase.auth().currentUser) return;
 
             try {
                 await appStateRef.set({
+                    version: DATA_VERSION,
                     products: PRODUCTS,
                     phones: PHONES,
                     sales: SALES,
+                    clients: CLIENTS,
                     categories: CATEGORIES,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -1260,20 +1235,28 @@ const CARD_SURCHARGE = 0.10;
             if (p) try { PRODUCTS = JSON.parse(p); } catch(e){}
             if (ph) try { PHONES = JSON.parse(ph); } catch(e){}
             if (s) try { SALES = JSON.parse(s); } catch(e){}
+            const c = localStorage.getItem('bestore_internal_clients');
+            if (c) try { CLIENTS = JSON.parse(c); } catch(e){}
 
             try {
                 const snapshot = await appStateRef.get();
 
-                if (snapshot.exists && snapshot.data().products) {
+                if (snapshot.exists && snapshot.data().version === DATA_VERSION) {
                     const remoteState = snapshot.data();
                     PRODUCTS = remoteState.products || PRODUCTS;
                     PHONES = remoteState.phones || PHONES;
                     SALES = remoteState.sales || SALES;
+                    CLIENTS = remoteState.clients || CLIENTS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
                     localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
                     localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
                     localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+                    localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
                 } else {
+                    PRODUCTS = [];
+                    PHONES = [];
+                    SALES = [];
+                    CLIENTS = [];
                     await saveLocalState();
                 }
             } catch (error) {

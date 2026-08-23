@@ -111,12 +111,11 @@
                     <span>Plan Canje & Usados</span>
                 </button>
 
-                <button onclick="switchTab('sheets-sync')" id="nav-sheets-sync" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <div class="flex items-center gap-3">
-                        <i class="fa-solid fa-file-csv text-emerald-600 w-4 text-center"></i>
-                        <span>Sincro Google Sheets</span>
-                    </div>
-                    <i class="fa-solid fa-link text-[10px] text-emerald-600"></i>
+                <button onclick="switchTab('categories')" id="nav-categories" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-tags text-brand-600 w-4 text-center"></i><span>Categorías</span>
+                </button>
+                <button onclick="switchTab('clients')" id="nav-clients" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-users text-emerald-600 w-4 text-center"></i><span>Clientes</span>
                 </button>
                 <button onclick="openUserModal()" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-users-gear text-brand-600 w-4 text-center"></i><span>Usuarios</span>
@@ -132,12 +131,13 @@
                         OP
                     </div>
                     <div class="min-w-0">
-                        <p class="text-xs font-bold text-slate-900 truncate">Operador Local</p>
+                        <p id="currentUserName" class="text-xs font-bold text-slate-900 truncate">Usuario</p>
                         <p class="text-[10px] text-slate-500 flex items-center gap-1">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Sistema Interno
                         </p>
                     </div>
                 </div>
+                <button onclick="logoutUser()" class="mt-3 w-full text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg py-2"><i class="fa-solid fa-right-from-bracket mr-1"></i> Cerrar sesión</button>
             </div>
         </div>
     </aside>
@@ -152,8 +152,8 @@
                     <i class="fa-solid fa-chart-pie text-brand-600"></i> Dashboard General
                 </h2>
                 <div class="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 text-xs text-slate-600">
-                    <i class="fa-solid fa-file-excel text-emerald-600"></i>
-                    <span>Base de datos: <strong class="text-slate-900 font-semibold">Google Sheets Sync Activo</strong></span>
+                    <i class="fa-solid fa-database text-emerald-600"></i>
+                    <span>Base de datos: <strong class="text-slate-900 font-semibold">Firebase Activo</strong></span>
                 </div>
             </div>
 
@@ -265,9 +265,6 @@
                         </div>
 
                         <div class="pt-4 border-t border-bonewhite-border mt-4">
-                            <button onclick="exportStockCSV()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-2 rounded-xl flex items-center justify-center gap-2 transition">
-                                <i class="fa-solid fa-download text-slate-500"></i> Exportar Lista de Reposición (CSV)
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -306,15 +303,6 @@
                             </div>
                         </button>
 
-                        <button onclick="switchTab('sheets-sync')" class="p-3 bg-white border border-slate-200 hover:border-blue-500 rounded-xl flex items-center gap-3 transition group text-left">
-                            <div class="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-base group-hover:bg-blue-600 group-hover:text-white transition">
-                                <i class="fa-solid fa-file-csv"></i>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-slate-900 block">Sincronizar Sheets</span>
-                                <span class="text-[10px] text-slate-500">Importar/Exportar CSV</span>
-                            </div>
-                        </button>
                     </div>
                 </div>
             </section>
@@ -373,7 +361,8 @@
                                 <span>Datos del Cliente (Opcional):</span>
                             </div>
                             <div class="grid grid-cols-2 gap-2 text-xs">
-                                <input type="text" id="posCustomerName" placeholder="Nombre completo" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                                <input type="text" id="posCustomerName" list="clientsOptions" placeholder="Nombre completo" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                                <datalist id="clientsOptions"></datalist>
                                 <input type="text" id="posCustomerPhone" placeholder="Teléfono / WhatsApp" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
                             </div>
                         </div>
@@ -469,9 +458,6 @@
                     </div>
 
                     <div class="flex items-center gap-2 w-full md:w-auto">
-                        <button onclick="exportStockCSV()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 transition">
-                            <i class="fa-solid fa-file-csv text-emerald-600"></i> Exportar CSV
-                        </button>
                         <button openProductModal() onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
                             <i class="fa-solid fa-plus"></i> Nuevo Producto
                         </button>
@@ -566,9 +552,6 @@
                     <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
                         <i class="fa-solid fa-receipt text-slate-600"></i> Registro de Operaciones y Ventas
                     </h3>
-                    <button onclick="exportSalesCSV()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 transition">
-                        <i class="fa-solid fa-download text-emerald-600"></i> Exportar Ventas
-                    </button>
                 </div>
 
                 <div class="custom-card overflow-hidden">
@@ -676,52 +659,17 @@
                 </div>
             </section>
 
-            <!-- SECTION 7: GOOGLE SHEETS SYNC & CSV IMPORT/EXPORT -->
-            <section id="view-sheets-sync" class="hidden space-y-6">
-                <div class="custom-card p-6 space-y-4">
-                    <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
-                        <div>
-                            <h3 class="font-extrabold text-slate-900 text-base flex items-center gap-2">
-                                <i class="fa-solid fa-file-csv text-emerald-600"></i> Sincronización con Google Sheets
-                            </h3>
-                            <p class="text-xs text-slate-500">Mantené actualizados tus precios y stock sincronizando con tu documento de Google Sheets.</p>
-                        </div>
-                        <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">CSV Ready</span>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <!-- Export CSV -->
-                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
-                            <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-lg">
-                                <i class="fa-solid fa-file-export"></i>
-                            </div>
-                            <h4 class="font-bold text-slate-900 text-sm">Exportar Datos a Google Sheets</h4>
-                            <p class="text-xs text-slate-600">Descargá el archivo CSV estructurado para pegarlo o importarlo en tu planilla oficial de precios.</p>
-                            
-                            <div class="pt-2 space-y-2">
-                                <button onclick="exportStockCSV()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition">
-                                    <i class="fa-solid fa-download"></i> Descargar CSV Inventario Completo
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Import CSV -->
-                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
-                            <div class="w-10 h-10 rounded-xl bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-lg">
-                                <i class="fa-solid fa-file-import"></i>
-                            </div>
-                            <h4 class="font-bold text-slate-900 text-sm">Cargar Precios / Archivo CSV</h4>
-                            <p class="text-xs text-slate-600">Seleccioná un archivo `.csv` descargado desde Google Sheets para actualizar la base de precios local.</p>
-
-                            <div class="pt-2">
-                                <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="handleCSVImport(event)">
-                                <button onclick="document.getElementById('csvFileInput').click()" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition">
-                                    <i class="fa-solid fa-upload"></i> Seleccionar Archivo CSV de Sheets
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+            <section id="view-categories" class="hidden space-y-4">
+                <div class="custom-card p-5 flex items-center justify-between">
+                    <h3 class="font-extrabold text-slate-900">Categorías</h3>
+                    <div class="flex gap-2"><select id="categorySort" onchange="renderCategoriesPage()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs"><option value="name">Ordenar por nombre</option><option value="count">Ordenar por cantidad</option></select><button onclick="openCategoryModal()" class="bg-brand-600 text-white font-bold px-3 py-2 rounded-xl text-xs">Nueva categoría</button></div>
                 </div>
+                <div id="categoriesPageList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+            </section>
+
+            <section id="view-clients" class="hidden space-y-4">
+                <div class="custom-card p-5"><h3 class="font-extrabold text-slate-900 mb-4">Clientes</h3><form onsubmit="saveClient(event)" class="grid grid-cols-1 md:grid-cols-3 gap-2"><input id="clientName" required placeholder="Nombre completo" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><input id="clientPhone" placeholder="Teléfono / WhatsApp" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><input id="clientEmail" type="email" placeholder="Email (opcional)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><button class="md:col-span-3 bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs">Registrar cliente</button></form></div>
+                <div class="custom-card overflow-hidden"><table class="w-full text-left text-xs"><thead><tr class="bg-slate-50 border-b border-slate-200"><th class="p-3">Cliente</th><th class="p-3">Contacto</th><th class="p-3">Compras</th></tr></thead><tbody id="clientsTableBody"></tbody></table></div>
             </section>
 
         </main>
@@ -955,10 +903,11 @@
     <div id="userModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
         <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div class="flex items-center justify-between border-b border-slate-200 pb-3"><h3 class="font-extrabold text-slate-900">Crear vendedor</h3><button onclick="closeUserModal()" class="text-slate-400 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
-            <form onsubmit="createSeller(event)" class="space-y-3">
-                <input id="sellerNick" required placeholder="Nick único" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                <input id="sellerPassword" required minlength="6" type="password" placeholder="Clave inicial" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                <button class="w-full bg-brand-600 text-white font-bold py-2.5 rounded-xl text-xs">Registrar vendedor</button>
+            <form onsubmit="createUser(event)" class="space-y-3">
+                <input id="newUserNick" required placeholder="Nick único" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                <input id="newUserPassword" required minlength="6" type="password" placeholder="Clave inicial" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                <select id="newUserRole" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><option value="seller">Vendedor</option><option value="admin">Admin</option></select>
+                <button class="w-full bg-brand-600 text-white font-bold py-2.5 rounded-xl text-xs">Registrar usuario</button>
             </form>
             <div id="userList" class="space-y-2 max-h-48 overflow-y-auto"></div>
         </div>
