@@ -782,7 +782,7 @@ const DATA_VERSION = 2;
             }
 
             body.innerHTML = SALES.map(sale => `
-                <tr class="hover:bg-slate-50 transition">
+                <tr class="hover:bg-slate-50 transition ${sale.status === 'Anulada' ? 'opacity-50 bg-red-50' : ''}">
                     <td class="p-3.5">
                         <span class="font-bold text-slate-900 block font-mono-num">${sale.id}</span>
                         <span class="text-[10px] text-slate-400">${sale.date}</span>
@@ -797,14 +797,44 @@ const DATA_VERSION = 2;
                         </div>
                     </td>
                     <td class="p-3.5 font-semibold text-slate-700">${sale.paymentMethod}</td>
-                    <td class="p-3.5 font-bold font-mono-num text-emerald-600">$${sale.total.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 font-bold font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')} ${sale.status === 'Anulada' ? '<span class="block text-[10px] no-underline">ANULADA</span>' : ''}</td>
                     <td class="p-3.5 text-center">
                         <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
                             <i class="fa-solid fa-receipt"></i>
                         </button>
+                        ${isAdmin() && sale.status !== 'Anulada' ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
+                        ${isAdmin() ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
+        }
+
+        async function cancelSale(saleId) {
+            if (!requireAdmin()) return;
+            const sale = SALES.find(item => item.id === saleId);
+            if (!sale || sale.status === 'Anulada') return;
+            sale.items.forEach(item => {
+                if (item.type === 'acc') {
+                    const product = PRODUCTS.find(productItem => productItem.id === item.id);
+                    if (product) product.stock += item.quantity;
+                } else if (item.type === 'phone') {
+                    const phone = PHONES.find(phoneItem => phoneItem.id === item.id);
+                    if (phone) phone.status = 'En Stock';
+                }
+            });
+            sale.status = 'Anulada';
+            await saveLocalState();
+            renderSalesTable();
+            showToast('Venta anulada. Se conserva en el historial.');
+        }
+
+        async function deleteSale(saleId) {
+            if (!requireAdmin()) return;
+            SALES = SALES.filter(item => item.id !== saleId);
+            await saveLocalState();
+            renderSalesTable();
+            renderDashboard();
+            showToast('Venta eliminada del historial.');
         }
 
         function reprintReceipt(saleId) {
@@ -843,14 +873,14 @@ const DATA_VERSION = 2;
         function sendReceiptViaWhatsApp() {
             if (!lastCreatedSale) return;
 
-            let msg = 'BE STORE - COMPROBANTE DE COMPRA' + nl;
-            msg += 'N Ticket: ' + lastCreatedSale.id + nl + 'Fecha: ' + lastCreatedSale.date + nl + 'Cliente: ' + lastCreatedSale.customerName + nl + nl;
-            msg += 'Detalle de Productos:' + nl;
+            let msg = 'BE STORE - COMPROBANTE DE COMPRA\n';
+            msg += 'N Ticket: ' + lastCreatedSale.id + '\nFecha: ' + lastCreatedSale.date + '\nCliente: ' + lastCreatedSale.customerName + '\n\n';
+            msg += 'Detalle de Productos:\n';
             lastCreatedSale.items.forEach((item, index) => {
-                msg += (index + 1) + '. ' + item.quantity + 'x ' + item.title + ' - ' + (item.price * item.quantity).toLocaleString('es-AR') + nl;
+                msg += (index + 1) + '. ' + item.quantity + 'x ' + item.title + ' - ' + (item.price * item.quantity).toLocaleString('es-AR') + '\n';
             });
-            msg += nl + 'Total Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + nl;
-            msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + nl + nl + 'Gracias por elegir BE STORE! @bestoreok';
+            msg += '\nTotal Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + '\n';
+            msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + '\n\nGracias por elegir BE STORE! @bestoreok';
             window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
         }
 
@@ -914,8 +944,21 @@ const DATA_VERSION = 2;
                 return sort === 'count' ? countB - countA || a.name.localeCompare(b.name) : a.name.localeCompare(b.name);
             });
             container.innerHTML = categories.map(category => `
-                <div class="custom-card p-5"><div class="flex items-center justify-between"><h4 class="font-bold text-slate-900">${category.name}</h4><span class="bg-brand-50 text-brand-700 rounded-full px-2 py-1 text-xs font-bold">${PRODUCTS.filter(product => product.category === category.id).length} productos</span></div></div>
+                <button onclick="showCategoryProducts('${category.id}')" class="custom-card p-5 text-left hover:border-brand-500 transition"><div class="flex items-center justify-between"><h4 class="font-bold text-slate-900">${category.name}</h4><span class="bg-brand-50 text-brand-700 rounded-full px-2 py-1 text-xs font-bold">${PRODUCTS.filter(product => product.category === category.id).length} productos</span></div><p class="text-[11px] text-slate-500 mt-2">Ver productos de esta categoría</p></button>
             `).join('');
+        }
+
+        function showCategoryProducts(categoryId) {
+            const category = CATEGORIES.find(item => item.id === categoryId);
+            if (!category) return;
+            const products = PRODUCTS.filter(product => product.category === categoryId);
+            document.getElementById('categoryProductsTitle').textContent = `${category.name} (${products.length})`;
+            document.getElementById('categoryProductsList').innerHTML = products.map(product => `<div class="border border-slate-200 rounded-xl p-3 flex items-center justify-between"><div><p class="font-bold text-xs text-slate-900">${product.title}</p><p class="text-[10px] text-slate-500">${product.brand} · Stock: ${product.stock}</p></div><span class="font-mono-num font-bold text-xs">$${product.price.toLocaleString('es-AR')}</span></div>`).join('') || '<p class="text-xs text-slate-400">No hay productos en esta categoría.</p>';
+            document.getElementById('categoryProductsPanel').classList.remove('hidden');
+        }
+
+        function closeCategoryProducts() {
+            document.getElementById('categoryProductsPanel').classList.add('hidden');
         }
 
         function renderClients() {
