@@ -49,7 +49,13 @@ let CATEGORIES = [
     { id: 'cargadores', name: 'Cargadores & Cables' },
     { id: 'audio', name: 'Audio & Auriculares' }
 ];
-const CARD_SURCHARGE = 0.10;
+const CARD_PLANS = {
+    'mp-single': { label: 'Mercado Pago - 1 pago', rate: 0.0649 },
+    'mp-3': { label: 'Mercado Pago - 3 cuotas', rate: 0.1249 },
+    'pampa-4': { label: 'Banco Pampa - 4 cuotas', rate: 0 },
+    'pampa-20': { label: 'Banco Pampa - 20 cuotas', rate: 0.20 }
+};
+const MERCADO_PAGO_VAT_RATE = 0.21;
 const DATA_VERSION = 2;
 
 /* Empty initial state: inventory is entered manually by an administrator. */
@@ -57,6 +63,8 @@ const DATA_VERSION = 2;
         let PHONES = [];
         let SALES = [];
         let CLIENTS = [];
+        let cashRegister = { date: '', openingCash: 0, open: false };
+        let dailyDollarRate = 0;
 
         let posState = {
             ticket: [],
@@ -67,6 +75,7 @@ const DATA_VERSION = 2;
         let activeTradeInValuation = 0;
         let categoryChartInstance = null;
         let lastCreatedSale = null;
+        let productFeedbackTimer = null;
 
         /* INITIALIZATION ON LOAD */
         window.onload = async function() {
@@ -125,6 +134,8 @@ const DATA_VERSION = 2;
             document.getElementById('authScreen').classList.add('hidden');
             await loadLocalState();
             normalizeCommercialData();
+            document.getElementById('dailyDollarRate').value = dailyDollarRate || '';
+            updatePhonePriceLabel();
             startSystemClock();
             renderDashboard();
             renderAccTable();
@@ -271,6 +282,7 @@ const DATA_VERSION = 2;
 
             document.getElementById('dashSalesToday').textContent = `${salesToday.length} oper.`;
             document.getElementById('dashRevenueToday').textContent = `$${revToday.toLocaleString('es-AR')} facturado`;
+            renderCashRegister();
 
             // Badges
             const badgeLow = document.getElementById('badgeLowStock');
@@ -305,6 +317,38 @@ const DATA_VERSION = 2;
 
         function normalizeCommercialData() {
             PRODUCTS.forEach(product => { product.cashPrice = product.price; });
+            PHONES.forEach(phone => {
+                if (!phone.currency) phone.currency = 'ARS';
+                if (phone.currency === 'USD' && phone.priceUsd && dailyDollarRate > 0) phone.price = Math.round(phone.priceUsd * dailyDollarRate);
+            });
+        }
+
+        function getCardPlanRate() {
+            return CARD_PLANS[document.getElementById('cardPlanSelect').value]?.rate || 0;
+        }
+
+        function calculateCardCharges(cardAmount) {
+            const planId = document.getElementById('cardPlanSelect').value;
+            const plan = CARD_PLANS[planId] || { rate: 0 };
+            const commission = Math.round(cardAmount * plan.rate);
+            const vat = planId.startsWith('mp-') ? Math.round(commission * MERCADO_PAGO_VAT_RATE) : 0;
+            return { commission, vat, total: commission + vat };
+        }
+
+        async function updateDollarRate() {
+            if (!requireAdmin()) return;
+            const input = parseFloat(document.getElementById('dailyDollarRate').value);
+            if (!Number.isFinite(input) || input <= 0) {
+                showToast('Ingresa una cotización del dólar válida.');
+                return;
+            }
+            dailyDollarRate = input;
+            normalizeCommercialData();
+            await saveLocalState();
+            renderDashboard();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            showToast('Cotización actualizada. Se recalcularon los celulares en USD.');
         }
 
         function renderCategoryChart() {
@@ -495,6 +539,26 @@ const DATA_VERSION = 2;
             renderPOSItemsGrid();
         }
 
+        function handleBarcodeScan(event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            const code = event.target.value.trim().toLowerCase();
+            if (!code) return;
+
+            const product = PRODUCTS.find(item => item.id.toLowerCase() === code || item.barcode?.toLowerCase() === code);
+            const phone = PHONES.find(item => item.id.toLowerCase() === code || item.imei.toLowerCase() === code);
+            const item = product || phone;
+
+            if (!item) {
+                showToast('No se encontró ningún producto con ese código.');
+            } else {
+                addPOSItem(item.id, product ? 'acc' : 'phone');
+            }
+
+            event.target.value = '';
+            event.target.focus();
+        }
+
         function renderPOSItemsGrid() {
             const grid = document.getElementById('posItemsGrid');
             const search = document.getElementById('posSearchInput').value.toLowerCase();
@@ -639,15 +703,28 @@ const DATA_VERSION = 2;
             posState.paymentMethod = method;
             const btnTransf = document.getElementById('posPayTransfer');
             const btnCard = document.getElementById('posPayCard');
+            const btnMixed = document.getElementById('posPayMixed');
+            const mixedFields = document.getElementById('mixedPaymentFields');
+            posState.paymentMethod = method;
 
             if (method === 'transfer') {
                 document.getElementById('cardPlanSelect').classList.add('hidden');
+                mixedFields.classList.add('hidden');
                 btnTransf.className = 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition';
+                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            } else if (method === 'mixed') {
+                document.getElementById('cardPlanSelect').classList.remove('hidden');
+                mixedFields.classList.remove('hidden');
+                btnMixed.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
+                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
                 btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             } else {
                 document.getElementById('cardPlanSelect').classList.remove('hidden');
+                mixedFields.classList.add('hidden');
                 btnCard.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
                 btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             }
 
             calculatePOSTotals();
@@ -698,15 +775,29 @@ const DATA_VERSION = 2;
         function calculatePOSTotals() {
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
-            const plan = document.getElementById('cardPlanSelect').value;
-            const surchargeRate = posState.paymentMethod === 'card' && plan === 'card-20' ? 0.20 : (posState.paymentMethod === 'card' && plan === 'card-single' ? CARD_SURCHARGE : 0);
-            const surcharge = Math.round(subtotal * surchargeRate);
+            const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : Math.max(0, subtotal - canjeVal);
+            const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
+            const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
-            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')}`;
+            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (comisión + IVA)`;
             let finalTotal = Math.max(0, subtotal + surcharge - canjeVal);
 
             document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
             document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
+        }
+
+        function syncMixedPayment(source) {
+            const subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
+            const amountDue = Math.max(0, subtotal - canjeVal);
+            const sourceInput = document.getElementById(source === 'cash' ? 'mixedCashAmount' : 'mixedCardAmount');
+            const otherInput = document.getElementById(source === 'cash' ? 'mixedCardAmount' : 'mixedCashAmount');
+            const sourceAmount = Math.min(Math.max(0, parseFloat(sourceInput.value) || 0), amountDue);
+
+            sourceInput.value = sourceAmount || '';
+            otherInput.value = sourceAmount < amountDue ? amountDue - sourceAmount : '';
+            calculatePOSTotals();
         }
 
         function processPOSCheckout() {
@@ -720,10 +811,21 @@ const DATA_VERSION = 2;
             const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
 
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const plan = document.getElementById('cardPlanSelect').value;
-            const surchargeRate = posState.paymentMethod === 'card' && plan === 'card-20' ? 0.20 : (posState.paymentMethod === 'card' && plan === 'card-single' ? CARD_SURCHARGE : 0);
-            const surcharge = Math.round(subtotal * surchargeRate);
-            let total = Math.max(0, subtotal + surcharge - canjeVal);
+            const mixedCash = parseFloat(document.getElementById('mixedCashAmount').value) || 0;
+            const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
+            const netTotal = Math.max(0, subtotal - canjeVal);
+            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) > Math.round(netTotal)) {
+                showToast('El pago mixto no puede superar el importe a cobrar.');
+                return;
+            }
+            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) !== Math.round(netTotal)) {
+                showToast('El pago mixto debe completar el importe a cobrar.');
+                return;
+            }
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : netTotal;
+            const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
+            const surcharge = cardCharges.total;
+            let total = netTotal + surcharge;
 
             // Deduct Stock
             posState.ticket.forEach(tItem => {
@@ -743,7 +845,10 @@ const DATA_VERSION = 2;
                 customerName: customerName,
                 customerPhone: customerPhone,
                 items: [...posState.ticket],
-                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : 'Tarjeta/Cuotas',
+                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : 'Tarjeta/Cuotas',
+                paymentBreakdown: { cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'transfer' ? total : 0, card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0 },
+                cardCommission: cardCharges.commission,
+                cardCommissionVat: cardCharges.vat,
                 canjeDeduction: canjeVal,
                 surcharge: surcharge,
                 subtotal: subtotal,
@@ -770,6 +875,68 @@ const DATA_VERSION = 2;
             openReceiptModal(saleRecord);
             clearPOSTicket();
             showToast("¡Venta finalizada y registrada correctamente!");
+        }
+
+        function cashRegisterDate() {
+            return new Date().toLocaleDateString('es-AR');
+        }
+
+        function renderCashRegister() {
+            const today = cashRegisterDate();
+            const todaySales = SALES.filter(sale => sale.date.includes(today) && sale.status !== 'Anulada');
+            const totals = todaySales.reduce((result, sale) => {
+                const breakdown = sale.paymentBreakdown || {
+                    cash: sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total,
+                    card: sale.paymentMethod === 'Tarjeta/Cuotas' ? sale.total : 0
+                };
+                result.cash += breakdown.cash || 0;
+                result.card += breakdown.card || 0;
+                return result;
+            }, { cash: 0, card: 0 });
+            const opening = cashRegister.date === today ? cashRegister.openingCash : 0;
+            const status = cashRegister.date === today && cashRegister.open ? `Abierta con $${opening.toLocaleString('es-AR')} de fondo` : 'Caja cerrada';
+            document.getElementById('cashRegisterStatus').textContent = status;
+            document.getElementById('cashRegisterSummary').innerHTML = `
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Efectivo / transferencia</span><strong class="text-slate-900">$${totals.cash.toLocaleString('es-AR')}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Tarjetas</span><strong class="text-slate-900">$${totals.card.toLocaleString('es-AR')}</strong></div>
+                <div class="bg-emerald-50 rounded-xl p-3"><span class="block text-emerald-700">Efectivo esperado</span><strong class="text-emerald-800">$${(opening + totals.cash).toLocaleString('es-AR')}</strong></div>
+            `;
+        }
+
+        async function openCashRegister() {
+            if (!requireAdmin()) return;
+            const opening = parseFloat(document.getElementById('openingCashInput').value);
+            if (!Number.isFinite(opening) || opening < 0) {
+                showToast('Ingresa un fondo inicial válido para abrir la caja.');
+                return;
+            }
+            cashRegister = { date: cashRegisterDate(), openingCash: opening, open: true };
+            await saveLocalState();
+            renderCashRegister();
+            showToast('Caja abierta correctamente.');
+        }
+
+        async function closeCashRegister() {
+            if (!requireAdmin()) return;
+            if (cashRegister.date !== cashRegisterDate() || !cashRegister.open) {
+                showToast('No hay una caja abierta para cerrar.');
+                return;
+            }
+            const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada');
+            const cashSales = todaySales.reduce((sum, sale) => sum + (sale.paymentBreakdown?.cash || (sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total)), 0);
+            const expectedAmount = cashRegister.openingCash + cashSales;
+            const expected = `$${expectedAmount.toLocaleString('es-AR')}`;
+            const actual = window.prompt(`Efectivo real contado (esperado ${expected}):`, '0');
+            if (actual === null) return;
+            const actualCash = parseFloat(actual);
+            if (!Number.isFinite(actualCash) || actualCash < 0) {
+                showToast('Ingresa un importe contado válido.');
+                return;
+            }
+            cashRegister = { ...cashRegister, open: false, closingCash: actualCash, closedAt: new Date().toISOString() };
+            await saveLocalState();
+            renderCashRegister();
+            showToast(`Caja cerrada. Diferencia: $${(actualCash - expectedAmount).toLocaleString('es-AR')}`);
         }
 
         /* SALES HISTORY TABLE */
@@ -1094,6 +1261,7 @@ const DATA_VERSION = 2;
         /* MODAL CRUD OPERATIONS FOR ACCESSORIES */
         function openProductModal() {
             if (!requireAdmin()) return;
+            hideProductFeedback();
             document.getElementById('productForm').reset();
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
@@ -1101,6 +1269,7 @@ const DATA_VERSION = 2;
         }
 
         function closeProductModal() {
+            hideProductFeedback();
             document.getElementById('productModal').classList.add('hidden');
         }
 
@@ -1109,7 +1278,7 @@ const DATA_VERSION = 2;
             document.getElementById('prodCashPrice').value = listPrice;
         }
 
-        function saveProduct(e) {
+        async function saveProduct(e) {
             e.preventDefault();
             if (!requireAdmin()) return;
             const id = document.getElementById('prodId').value || `ACC-${Date.now().toString().slice(-4)}`;
@@ -1122,22 +1291,50 @@ const DATA_VERSION = 2;
             const price = parseFloat(document.getElementById('prodPrice').value) || 0;
             const cashPrice = price;
             const image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
+            const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
-            const productObj = { id, title, category, brand, stock, minStock, cost, price, cashPrice, image };
+            const productObj = { id, title, category, brand, stock, minStock, cost, price, cashPrice, image, barcode };
 
-            if (existingIndex > -1) {
-                PRODUCTS[existingIndex] = productObj;
-                showToast("Producto actualizado exitosamente.");
-            } else {
-                PRODUCTS.push(productObj);
-                showToast("Nuevo producto cargado al inventario.");
+            const isUpdate = existingIndex > -1;
+
+            try {
+                if (isUpdate) {
+                    PRODUCTS[existingIndex] = productObj;
+                } else {
+                    PRODUCTS.push(productObj);
+                }
+
+                await saveLocalState();
+                renderDashboard();
+                renderAccTable();
+                document.getElementById('productForm').reset();
+                document.getElementById('prodId').value = '';
+                document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
+                showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
+            } catch (error) {
+                console.error('No se pudo guardar el producto:', error);
+                showProductFeedback('No se pudo guardar el producto. Revisa los datos e intenta nuevamente.', false);
             }
+        }
 
-            saveLocalState();
-            renderDashboard();
-            renderAccTable();
-            closeProductModal();
+        function showProductFeedback(message, isSuccess) {
+            const feedback = document.getElementById('productFeedback');
+            const icon = document.getElementById('productFeedbackIcon');
+
+            clearTimeout(productFeedbackTimer);
+            icon.className = `mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full text-xl ${isSuccess ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`;
+            icon.innerHTML = isSuccess ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-circle-exclamation"></i>';
+            document.getElementById('productFeedbackMessage').textContent = message;
+            feedback.classList.remove('hidden');
+            productFeedbackTimer = setTimeout(hideProductFeedback, 2200);
+        }
+
+        function hideProductFeedback() {
+            clearTimeout(productFeedbackTimer);
+            productFeedbackTimer = null;
+            const feedback = document.getElementById('productFeedback');
+            if (feedback) feedback.classList.add('hidden');
         }
 
         function editProduct(id) {
@@ -1154,6 +1351,7 @@ const DATA_VERSION = 2;
             document.getElementById('prodPrice').value = p.price;
             document.getElementById('prodCashPrice').value = p.cashPrice;
             document.getElementById('prodImage').value = p.image;
+            document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';
             document.getElementById('productModal').classList.remove('hidden');
@@ -1193,6 +1391,34 @@ const DATA_VERSION = 2;
             document.getElementById('phoneModal').classList.add('hidden');
         }
 
+        function updatePhonePriceLabel() {
+            const currency = document.getElementById('phoneCurrency').value;
+            document.getElementById('phonePriceLabel').textContent = `Precio Efectivo / Transf. (${currency}) *`;
+            updatePhoneConvertedPrice();
+        }
+
+        function updatePhoneConvertedPrice() {
+            const currency = document.getElementById('phoneCurrency').value;
+            const enteredPrice = parseFloat(document.getElementById('phonePrice').value) || 0;
+            const converted = currency === 'USD' ? enteredPrice * dailyDollarRate : enteredPrice;
+            const output = document.getElementById('phoneConvertedPrice');
+            output.value = converted > 0 ? `$${Math.round(converted).toLocaleString('es-AR')}` : '';
+        }
+
+        function validatePhoneImei() {
+            const input = document.getElementById('phoneImei');
+            const feedback = document.getElementById('phoneImeiFeedback');
+            const imei = input.value.trim().toLowerCase();
+            const currentId = document.getElementById('phoneId').value;
+            const duplicate = PHONES.find(phone => phone.imei.trim().toLowerCase() === imei && phone.id !== currentId);
+
+            input.classList.toggle('border-red-500', Boolean(duplicate));
+            input.classList.toggle('border-emerald-500', Boolean(imei) && !duplicate);
+            feedback.textContent = duplicate ? 'Este IMEI ya existe en el inventario o fue registrado previamente.' : imei ? 'IMEI disponible.' : '';
+            feedback.className = `mt-1 text-[10px] font-semibold ${duplicate ? 'text-red-600' : 'text-emerald-600'}`;
+            return !duplicate;
+        }
+
         function savePhoneUnit(e) {
             e.preventDefault();
             if (!requireAdmin()) return;
@@ -1204,11 +1430,23 @@ const DATA_VERSION = 2;
             const storage = document.getElementById('phoneStorage').value;
             const color = document.getElementById('phoneColor').value;
             const imei = document.getElementById('phoneImei').value;
-            const price = parseFloat(document.getElementById('phonePrice').value) || 0;
+            const currency = document.getElementById('phoneCurrency').value;
+            const enteredPrice = parseFloat(document.getElementById('phonePrice').value) || 0;
+            if (currency === 'USD' && dailyDollarRate <= 0) {
+                showToast('Carga primero la cotización del dólar para guardar un precio en USD.');
+                return;
+            }
+            const priceUsd = currency === 'USD' ? enteredPrice : null;
+            const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
             const image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
 
-            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, status, image };
+            if (!validatePhoneImei()) {
+                showToast('No se puede guardar: el IMEI ya está registrado.');
+                return;
+            }
+
+            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image };
             const existingIndex = PHONES.findIndex(p => p.id === id);
 
             if (existingIndex > -1) {
@@ -1239,6 +1477,10 @@ const DATA_VERSION = 2;
             document.getElementById('phoneColor').value = ph.color;
             document.getElementById('phoneImei').value = ph.imei;
             document.getElementById('phonePrice').value = ph.price;
+            document.getElementById('phoneCurrency').value = ph.currency || 'ARS';
+            document.getElementById('phonePrice').value = ph.currency === 'USD' ? ph.priceUsd : ph.price;
+            updatePhonePriceLabel();
+            updatePhoneConvertedPrice();
             document.getElementById('phoneStatus').value = ph.status;
             document.getElementById('phoneImage').value = ph.image;
 
@@ -1252,6 +1494,8 @@ const DATA_VERSION = 2;
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
             localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+            localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
+            localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
 
             if (!firebase.auth().currentUser) return;
 
@@ -1263,6 +1507,8 @@ const DATA_VERSION = 2;
                     sales: SALES,
                     clients: CLIENTS,
                     categories: CATEGORIES,
+                    cashRegister,
+                    dailyDollarRate,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
             } catch (error) {
@@ -1280,6 +1526,10 @@ const DATA_VERSION = 2;
             if (s) try { SALES = JSON.parse(s); } catch(e){}
             const c = localStorage.getItem('bestore_internal_clients');
             if (c) try { CLIENTS = JSON.parse(c); } catch(e){}
+            const cash = localStorage.getItem('bestore_internal_cash_register');
+            if (cash) try { cashRegister = JSON.parse(cash); } catch(e){}
+            const dollar = localStorage.getItem('bestore_internal_dollar_rate');
+            if (dollar) dailyDollarRate = parseFloat(dollar) || 0;
 
             try {
                 const snapshot = await appStateRef.get();
@@ -1291,10 +1541,14 @@ const DATA_VERSION = 2;
                     SALES = remoteState.sales || SALES;
                     CLIENTS = remoteState.clients || CLIENTS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
+                    cashRegister = remoteState.cashRegister || cashRegister;
+                    dailyDollarRate = remoteState.dailyDollarRate || dailyDollarRate;
                     localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
                     localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
                     localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
                     localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+                    localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
+                    localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
                 } else {
                     PRODUCTS = [];
                     PHONES = [];
