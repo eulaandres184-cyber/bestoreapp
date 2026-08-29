@@ -140,7 +140,6 @@ let IPHONE_TRADE_IN_RATES = [];
         let posOperationInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
-        let categoryChartInstance = null;
         let lastCreatedSale = null;
         let productFeedbackTimer = null;
 
@@ -398,7 +397,7 @@ let IPHONE_TRADE_IN_RATES = [];
             let newPhones = inStockPhones.filter(p => p.condition === 'Nuevo').length;
             let usedPhones = inStockPhones.filter(p => p.condition.includes('Usado')).length;
 
-            let lowStockAcc = PRODUCTS.filter(p => p.stock <= p.minStock);
+            let lowStockAcc = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.minStock);
 
             document.getElementById('dashTotalValue').textContent = `$${totalValue.toLocaleString('es-AR')}`;
             document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
@@ -442,7 +441,19 @@ let IPHONE_TRADE_IN_RATES = [];
                 `).join('');
             }
 
-            renderCategoryChart();
+            renderDashboardRecentSales();
+        }
+
+        function renderDashboardRecentSales() {
+            const container = document.getElementById('dashRecentSalesList');
+            const recentSales = SALES.slice(0, 6);
+            container.innerHTML = recentSales.map(sale => `
+                <button onclick="reprintReceipt('${sale.id}')" class="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left hover:border-brand-400 hover:bg-white transition">
+                    <span class="flex items-center justify-between gap-3"><strong class="text-xs text-slate-900">${sale.id}</strong><strong class="text-xs font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')}</strong></span>
+                    <span class="mt-1 block truncate text-[11px] text-slate-600">${sale.customerName} · ${sale.items.map(item => `${item.quantity}x ${item.title}`).join(', ')}</span>
+                    <span class="mt-1 block text-[10px] text-slate-400">${sale.date}${sale.status === 'Anulada' ? ' · Anulada' : ''}</span>
+                </button>
+            `).join('') || '<p class="py-12 text-center text-xs text-slate-400">Aún no hay ventas registradas.</p>';
         }
 
         function normalizeCommercialData() {
@@ -481,62 +492,25 @@ let IPHONE_TRADE_IN_RATES = [];
             showToast('Cotización actualizada. Se recalcularon los celulares en USD.');
         }
 
-        function renderCategoryChart() {
-            const ctx = document.getElementById('categoryChart').getContext('2d');
-            
-            const catMap = {
-                'fundas': 0,
-                'proteccion': 0,
-                'cargadores': 0,
-                'audio': 0,
-                'celulares': PHONES.filter(p => p.status === 'En Stock').length
-            };
-
-            PRODUCTS.forEach(p => {
-                if (catMap[p.category] !== undefined) {
-                    catMap[p.category] += p.stock;
-                }
-            });
-
-            if (categoryChartInstance) {
-                categoryChartInstance.destroy();
-            }
-
-            categoryChartInstance = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Fundas', 'Protección', 'Cargadores', 'Audio', 'Celulares'],
-                    datasets: [{
-                        label: 'Unidades en Stock',
-                        data: [catMap.fundas, catMap.proteccion, catMap.cargadores, catMap.audio, catMap.celulares],
-                        backgroundColor: ['#6366f1', '#38bdf8', '#059669', '#a855f7', '#d97706'],
-                        borderRadius: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
-                        x: { grid: { display: false } }
-                    }
-                }
-            });
-        }
-
         /* ACCESSORIES TABLE LOGIC */
         function renderAccTable() {
             const body = document.getElementById('accTableBody');
             const search = document.getElementById('accSearchInput').value.toLowerCase();
             const cat = document.getElementById('accCategoryFilter').value;
             const subcategory = document.getElementById('accSubcategoryFilter').value;
+            const sort = document.getElementById('accSort').value;
 
             const filtered = PRODUCTS.filter(p => {
                 const matchesCat = cat === 'ALL' || p.category === cat;
                 const matchesSubcategory = subcategory === 'ALL' || p.subcategory === subcategory;
                 const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search) || getCaseSubcategoryName(p.subcategory).toLowerCase().includes(search);
                 return matchesCat && matchesSubcategory && matchesSearch;
+            }).sort((first, second) => {
+                if (sort === 'stock-asc') return first.stock - second.stock || first.title.localeCompare(second.title);
+                if (sort === 'stock-desc') return second.stock - first.stock || first.title.localeCompare(second.title);
+                if (sort === 'price-asc') return first.price - second.price || first.title.localeCompare(second.title);
+                if (sort === 'price-desc') return second.price - first.price || first.title.localeCompare(second.title);
+                return first.title.localeCompare(second.title);
             });
 
             if (filtered.length === 0) {
@@ -545,7 +519,7 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             body.innerHTML = filtered.map(item => `
-                <tr class="hover:bg-slate-50 transition ${item.status === 'Vendido' ? 'opacity-50 bg-slate-100' : ''}">
+                <tr class="hover:bg-slate-50 transition ${item.status === 'Anulado' ? 'opacity-60 bg-slate-100' : ''}">
                     <td class="p-3.5">
                         <div class="accessory-product-cell flex items-center gap-3">
                             <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
@@ -562,7 +536,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     <td class="p-3.5">
                         <div class="accessory-stock-cell flex items-center gap-2">
                             <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
-                                ${item.stock} un.
+                                ${item.stock} un. ${item.status === 'Anulado' ? '<span class="ml-1 text-[9px] uppercase">Anulado</span>' : ''}
                             </span>
                             <div class="flex flex-col gap-0.5">
                                 <button onclick="quickAddStock('${item.id}', 1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">+</button>
@@ -578,8 +552,8 @@ let IPHONE_TRADE_IN_RATES = [];
                             <button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
-                            <button onclick="deleteProduct('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar">
-                                <i class="fa-solid fa-trash"></i>
+                            <button onclick="toggleProductStatus('${item.id}')" class="p-1.5 rounded-lg ${item.status === 'Anulado' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'} text-xs" title="${item.status === 'Anulado' ? 'Reactivar producto' : 'Anular producto'}">
+                                <i class="fa-solid ${item.status === 'Anulado' ? 'fa-rotate-left' : 'fa-ban'}"></i>
                             </button>
                         </div>
                     </td>
@@ -705,7 +679,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
             if (cat !== 'celulares') {
                 PRODUCTS.forEach(p => {
-                    if ((cat === 'ALL' || p.category === cat) && p.stock > 0) {
+                    if ((cat === 'ALL' || p.category === cat) && p.stock > 0 && p.status !== 'Anulado') {
                         if (p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search)) {
                             itemsList.push({ ...p, type: 'acc' });
                         }
@@ -1259,6 +1233,11 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!sale || sale.status !== 'Pendiente de emisión' || posOperationInProgress === false) return;
             sale.status = 'Confirmada';
             sale.deliveryMethod = deliveryMethod;
+            sale.items.forEach(item => {
+                if (item.type !== 'acc') return;
+                const product = PRODUCTS.find(productItem => productItem.id === item.id);
+                if (product?.stock === 0) product.status = 'Anulado';
+            });
             await saveLocalState();
             pendingSaleId = null;
             posState.ticket = [];
@@ -1712,7 +1691,8 @@ let IPHONE_TRADE_IN_RATES = [];
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
-            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode };
+            const status = stock === 0 ? 'Anulado' : (existingIndex > -1 ? PRODUCTS[existingIndex].status || 'Activo' : 'Activo');
+            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode, status };
 
             const isUpdate = existingIndex > -1;
 
@@ -1780,21 +1760,29 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('productModal').classList.remove('hidden');
         }
 
-        function deleteProduct(id) {
+        async function toggleProductStatus(id) {
             if (!requireAdmin()) return;
-            PRODUCTS = PRODUCTS.filter(p => p.id !== id);
-            saveLocalState();
+            const product = PRODUCTS.find(item => item.id === id);
+            if (!product) return;
+            if (product.status === 'Anulado') {
+                if (product.stock <= 0) return showToast('Repone stock antes de reactivar el producto.');
+                product.status = 'Activo';
+            } else {
+                product.status = 'Anulado';
+            }
+            await saveLocalState();
             renderDashboard();
             renderAccTable();
-            showToast("Producto eliminado del inventario.");
+            showToast(product.status === 'Anulado' ? 'Producto anulado del catálogo.' : 'Producto reactivado en el catálogo.');
         }
 
-        function quickAddStock(id, amount) {
+        async function quickAddStock(id, amount) {
             if (!requireAdmin()) return;
             const p = PRODUCTS.find(item => item.id === id);
             if (p) {
                 p.stock = Math.max(0, p.stock + amount);
-                saveLocalState();
+                p.status = p.stock === 0 ? 'Anulado' : 'Activo';
+                await saveLocalState();
                 renderDashboard();
                 renderAccTable();
                 showToast(`Stock actualizado para ${p.title}`);

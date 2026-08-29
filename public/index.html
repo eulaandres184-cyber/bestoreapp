@@ -251,18 +251,18 @@
 
                 <!-- Main Charts & Recent Activity Grid -->
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    <!-- Category Stock Breakdown Chart -->
+                    <!-- Recent Sales -->
                     <div class="lg:col-span-7 custom-card p-5">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <i class="fa-solid fa-chart-bar text-brand-600"></i> Distribución de Stock por Categoría
+                                <i class="fa-solid fa-receipt text-brand-600"></i> Historial de Ventas Recientes
                             </h3>
-                            <button onclick="switchTab('inventory-acc')" class="text-xs text-brand-600 hover:underline font-semibold">
-                                Ver Inventario Completo
+                            <button onclick="switchTab('sales-history')" class="text-xs text-brand-600 hover:underline font-semibold">
+                                Ver historial completo
                             </button>
                         </div>
-                        <div class="h-64 relative">
-                            <canvas id="categoryChart"></canvas>
+                        <div id="dashRecentSalesList" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            <!-- Populated dynamically -->
                         </div>
                     </div>
 
@@ -498,6 +498,13 @@
                         </select>
                         <select id="accSubcategoryFilter" onchange="renderAccTable()" disabled class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-400 disabled:cursor-not-allowed">
                             <option value="ALL">Todos los tipos</option>
+                        </select>
+                        <select id="accSort" onchange="renderAccTable()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-700">
+                            <option value="name-asc">Nombre: A a Z</option>
+                            <option value="stock-asc">Stock: menor a mayor</option>
+                            <option value="stock-desc">Stock: mayor a menor</option>
+                            <option value="price-asc">Precio: menor a mayor</option>
+                            <option value="price-desc">Precio: mayor a menor</option>
                         </select>
                     </div>
 
