@@ -1487,17 +1487,51 @@ let IPHONE_TRADE_IN_RATES = [];
             const body = document.getElementById('clientsTableBody');
             if (!body) return;
             document.getElementById('clientsOptions').innerHTML = CLIENTS.map(client => `<option value="${client.name}">`).join('');
-            body.innerHTML = CLIENTS.map(client => `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${client.phone || '-'}${client.email ? ` · ${client.email}` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Cuenta corriente: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
+            body.innerHTML = CLIENTS.map(client => {
+                const whatsappNumber = (client.phone || '').replace(/\D/g, '');
+                const contact = whatsappNumber
+                    ? `<a href="https://wa.me/${whatsappNumber}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline" title="Enviar mensaje por WhatsApp"><i class="fa-brands fa-whatsapp"></i>${client.phone}</a>`
+                    : '-';
+                return `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${contact}${client.email ? `<span class="block text-[10px] text-slate-500">${client.email}</span>` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Cuenta corriente: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td><td class="p-3 text-center"><button onclick="editClient('${client.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar cliente"><i class="fa-solid fa-pen"></i></button></td></tr>`;
+            }).join('') || '<tr><td colspan="4" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
         }
 
         async function saveClient(event) {
             event.preventDefault();
-            const client = { id: `CLI-${Date.now()}`, name: document.getElementById('clientName').value.trim(), phone: document.getElementById('clientPhone').value.trim(), email: document.getElementById('clientEmail').value.trim(), purchaseCount: 0 };
-            CLIENTS.push(client);
+            const clientId = document.getElementById('clientId').value;
+            const clientData = { name: document.getElementById('clientName').value.trim(), phone: document.getElementById('clientPhone').value.trim(), email: document.getElementById('clientEmail').value.trim() };
+            const existingIndex = CLIENTS.findIndex(client => client.id === clientId);
+            if (existingIndex > -1) {
+                CLIENTS[existingIndex] = { ...CLIENTS[existingIndex], ...clientData };
+            } else {
+                CLIENTS.push({ id: `CLI-${Date.now()}`, ...clientData, purchaseCount: 0, accountBalance: 0 });
+            }
             await saveLocalState();
-            event.target.reset();
+            cancelClientEdit();
             renderClients();
-            showToast('Cliente registrado correctamente.');
+            showToast(existingIndex > -1 ? 'Cliente actualizado correctamente.' : 'Cliente registrado correctamente.');
+        }
+
+        function editClient(clientId) {
+            const client = CLIENTS.find(item => item.id === clientId);
+            if (!client) return;
+            document.getElementById('clientId').value = client.id;
+            document.getElementById('clientName').value = client.name;
+            document.getElementById('clientPhone').value = client.phone || '';
+            document.getElementById('clientEmail').value = client.email || '';
+            document.getElementById('clientFormTitle').textContent = 'Editar cliente';
+            document.getElementById('clientSubmitButton').textContent = 'Guardar cambios';
+            document.getElementById('cancelClientEditButton').classList.remove('hidden');
+            document.getElementById('clientName').focus();
+        }
+
+        function cancelClientEdit() {
+            const form = document.getElementById('clientId').closest('form');
+            form.reset();
+            document.getElementById('clientId').value = '';
+            document.getElementById('clientFormTitle').textContent = 'Clientes';
+            document.getElementById('clientSubmitButton').textContent = 'Registrar cliente';
+            document.getElementById('cancelClientEditButton').classList.add('hidden');
         }
 
         async function markPhoneSold(id) {
