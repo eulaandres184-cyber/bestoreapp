@@ -168,6 +168,11 @@
                     <i class="fa-solid fa-database text-emerald-600"></i>
                     <span>Base de datos: <strong class="text-slate-900 font-semibold">Firebase Activo</strong></span>
                 </div>
+                <div class="flex items-center gap-2 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 text-xs text-amber-900">
+                    <i class="fa-solid fa-dollar-sign text-amber-600"></i>
+                    <label for="dailyDollarRate" class="font-semibold whitespace-nowrap">Dólar del día</label>
+                    <input id="dailyDollarRate" type="number" min="0" step="0.01" placeholder="Cotización" onchange="updateDollarRate()" class="w-24 bg-white border border-amber-200 rounded-lg px-2 py-1 text-xs font-mono-num text-right">
+                </div>
             </div>
 
             <div class="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -243,6 +248,21 @@
                         </div>
                     </div>
 
+                </div>
+
+                <div class="custom-card p-5">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-cash-register text-emerald-600"></i> Caja diaria</h3>
+                            <p id="cashRegisterStatus" class="text-xs text-slate-500 mt-1">Caja cerrada</p>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full md:w-auto">
+                            <input id="openingCashInput" type="number" min="0" placeholder="Fondo inicial" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
+                            <button onclick="openCashRegister()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-lock-open mr-1"></i> Abrir caja</button>
+                            <button onclick="closeCashRegister()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-lock mr-1"></i> Cerrar caja</button>
+                        </div>
+                    </div>
+                    <div id="cashRegisterSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs"></div>
                 </div>
 
                 <!-- Main Charts & Recent Activity Grid -->
@@ -338,6 +358,17 @@
                                 class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-emerald-500 focus:bg-white transition"
                             >
                         </div>
+                        <div class="relative">
+                            <i class="fa-solid fa-barcode absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                            <input
+                                type="text"
+                                id="posBarcodeInput"
+                                onkeydown="handleBarcodeScan(event)"
+                                placeholder="Escanear código, SKU o IMEI y presionar Enter..."
+                                autocomplete="off"
+                                class="w-full pl-9 pr-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-medium focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                            >
+                        </div>
 
                         <!-- Category Filter Pills -->
                         <div class="flex items-center gap-2 overflow-x-auto pb-1" id="posCategoryPills">
@@ -373,7 +404,7 @@
                             <div class="flex items-center justify-between text-xs font-bold text-slate-700">
                                 <span>Datos del Cliente (Opcional):</span>
                             </div>
-                            <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="grid grid-cols-3 gap-2 text-xs">
                                 <input type="text" id="posCustomerName" list="clientsOptions" placeholder="Nombre completo" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
                                 <datalist id="clientsOptions"></datalist>
                                 <input type="text" id="posCustomerPhone" placeholder="Teléfono / WhatsApp" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
@@ -399,12 +430,22 @@
                                 <button id="posPayCard" onclick="setPOSPaymentMethod('card')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
                                     Tarjeta de crédito
                                 </button>
+                                <button id="posPayMixed" onclick="setPOSPaymentMethod('mixed')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
+                                    Pago mixto
+                                </button>
                             </div>
-                            <select id="cardPlanSelect" onchange="setPOSPaymentMethod('card')" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold">
-                                <option value="card-single">Un pago (recargo configurable)</option>
-                                <option value="card-4">Banco Pampa - 4 cuotas sin interés</option>
-                                <option value="card-20">Banco Pampa - 20 cuotas (+20%)</option>
+                            <div id="mixedPaymentFields" class="hidden grid grid-cols-2 gap-2 mt-2">
+                                <input id="mixedCashAmount" type="number" min="0" oninput="syncMixedPayment('cash')" placeholder="Efectivo / transferencia" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <input id="mixedCardAmount" type="number" min="0" oninput="syncMixedPayment('card')" placeholder="Tarjeta" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <p class="col-span-2 text-[10px] text-slate-500">Los importes se completan sobre el saldo neto. La comisión e IVA de la tarjeta se suman al total final.</p>
+                            </div>
+                            <select id="cardPlanSelect" onchange="calculatePOSTotals()" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold">
+                                <option value="mp-single">Mercado Pago - 1 pago (6,49% comisión)</option>
+                                <option value="mp-3">Mercado Pago - 3 cuotas (12,49% comisión)</option>
+                                <option value="pampa-4">Banco Pampa - 4 cuotas sin interés</option>
+                                <option value="pampa-20">Banco Pampa - 20 cuotas (+20%)</option>
                             </select>
+                            <p class="text-[10px] text-slate-500 mt-1">Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.</p>
                         </div>
 
                         <!-- Trade-in Deduction Option -->
@@ -757,11 +798,24 @@
                     <input type="text" id="prodImage" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
                 </div>
 
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Código de barras (Opcional)</label>
+                    <input type="text" id="prodBarcode" placeholder="EAN / UPC" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono-num">
+                </div>
+
                 <div class="pt-3 flex justify-end gap-2">
                     <button type="button" onclick="closeProductModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancelar</button>
                     <button type="submit" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-sm">Guardar Producto</button>
                 </div>
             </form>
+        </div>
+        <div id="productFeedback" class="fixed inset-0 z-[60] hidden flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-[2px]">
+            <div class="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl">
+                <div id="productFeedbackIcon" class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-xl text-emerald-600">
+                    <i class="fa-solid fa-circle-check"></i>
+                </div>
+                <p id="productFeedbackMessage" class="text-sm font-bold text-slate-900"></p>
+            </div>
         </div>
     </div>
 
@@ -826,23 +880,37 @@
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">Nro Serie / IMEI *</label>
                         <input type="text" id="phoneImei" placeholder="3589..." required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono-num font-bold">
+                        <p id="phoneImeiFeedback" class="mt-1 text-[10px] font-semibold text-slate-500"></p>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                    <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block font-bold text-slate-700 mb-1">Precio Efectivo / Transf. ($) *</label>
-                        <input type="number" id="phonePrice" required min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                            <label class="block font-bold text-slate-700 mb-1">Moneda del precio *</label>
+                            <select id="phoneCurrency" onchange="updatePhonePriceLabel()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                                <option value="ARS">Pesos argentinos (ARS)</option>
+                                <option value="USD">Dólares (USD)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label id="phonePriceLabel" class="block font-bold text-slate-700 mb-1">Precio Efectivo / Transf. (ARS) *</label>
+                            <input type="number" id="phonePrice" required min="0" step="0.01" oninput="updatePhoneConvertedPrice()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold font-mono-num">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block font-bold text-slate-700 mb-1">Estado de Ficha</label>
-                        <select id="phoneStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
-                            <option value="En Stock">En Stock</option>
-                            <option value="Reservado">Reservado</option>
-                            <option value="Vendido">Vendido</option>
-                        </select>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Precio convertido (ARS)</label>
+                            <input type="text" id="phoneConvertedPrice" readonly class="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-2.5 text-xs font-bold font-mono-num" placeholder="Se calcula con el dólar del día">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Estado de Ficha</label>
+                            <select id="phoneStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                                <option value="En Stock">En Stock</option>
+                                <option value="Reservado">Reservado</option>
+                                <option value="Vendido">Vendido</option>
+                            </select>
+                        </div>
                     </div>
-                </div>
 
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">URL Imagen</label>
