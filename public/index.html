@@ -502,12 +502,15 @@
                                 class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-brand-500"
                             >
                         </div>
-                        <select id="accCategoryFilter" onchange="renderAccTable()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-700">
+                        <select id="accCategoryFilter" onchange="updateAccessorySubcategoryFilter(); renderAccTable()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-700">
                             <option value="ALL">Todas las Categorías</option>
                             <option value="fundas">Fundas & Covers</option>
                             <option value="proteccion">Vidrios Templados</option>
                             <option value="cargadores">Cargadores & Cables</option>
                             <option value="audio">Audio & Auriculares</option>
+                        </select>
+                        <select id="accSubcategoryFilter" onchange="renderAccTable()" disabled class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold text-slate-400 disabled:cursor-not-allowed">
+                            <option value="ALL">Todos los tipos</option>
                         </select>
                     </div>
 
@@ -754,7 +757,7 @@
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">Categoría *</label>
-                        <select id="prodCategory" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                        <select id="prodCategory" required onchange="updateProductSubcategoryField()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
                             <option value="fundas">Fundas & Covers</option>
                             <option value="proteccion">Vidrios Templados</option>
                             <option value="cargadores">Cargadores & Cables</option>
@@ -765,6 +768,19 @@
                         <label class="block font-bold text-slate-700 mb-1">Marca *</label>
                         <input type="text" id="prodBrand" placeholder="Apple, Samsung, BE..." required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
                     </div>
+                </div>
+
+                <div id="prodSubcategoryField" class="hidden">
+                    <label class="block font-bold text-slate-700 mb-1">Tipo de funda *</label>
+                    <select id="prodSubcategory" onchange="updateCustomCaseSubcategoryField()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                        <option value="">Seleccionar tipo de funda</option>
+                        <option value="transparente">Transparente</option>
+                        <option value="rigida">Rígida</option>
+                        <option value="silicona">Silicona</option>
+                        <option value="dibujos">Diseños / Dibujos</option>
+                        <option value="otro">Otro tipo</option>
+                    </select>
+                    <input type="text" id="prodCustomSubcategory" placeholder="Escribí el nuevo tipo de funda" class="hidden mt-2 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
                 </div>
 
                 <div class="grid grid-cols-3 gap-3">

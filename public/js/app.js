@@ -57,6 +57,12 @@ const CARD_PLANS = {
 };
 const MERCADO_PAGO_VAT_RATE = 0.21;
 const DATA_VERSION = 2;
+let CASE_SUBCATEGORIES = [
+    { id: 'transparente', name: 'Transparente' },
+    { id: 'rigida', name: 'Rígida' },
+    { id: 'silicona', name: 'Silicona' },
+    { id: 'dibujos', name: 'Diseños / Dibujos' }
+];
 
 /* Empty initial state: inventory is entered manually by an administrator. */
         let PRODUCTS = [];
@@ -462,11 +468,13 @@ const DATA_VERSION = 2;
             const body = document.getElementById('accTableBody');
             const search = document.getElementById('accSearchInput').value.toLowerCase();
             const cat = document.getElementById('accCategoryFilter').value;
+            const subcategory = document.getElementById('accSubcategoryFilter').value;
 
             const filtered = PRODUCTS.filter(p => {
                 const matchesCat = cat === 'ALL' || p.category === cat;
-                const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search);
-                return matchesCat && matchesSearch;
+                const matchesSubcategory = subcategory === 'ALL' || p.subcategory === subcategory;
+                const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search) || getCaseSubcategoryName(p.subcategory).toLowerCase().includes(search);
+                return matchesCat && matchesSubcategory && matchesSearch;
             });
 
             if (filtered.length === 0) {
@@ -485,7 +493,10 @@ const DATA_VERSION = 2;
                             </div>
                         </div>
                     </td>
-                    <td class="p-3.5 capitalize font-medium text-slate-600">${item.category}</td>
+                    <td class="p-3.5 font-medium text-slate-600">
+                        <span class="block">${getCategoryName(item.category)}</span>
+                        ${item.category === 'fundas' ? `<span class="text-[10px] text-brand-600">${getCaseSubcategoryName(item.subcategory)}</span>` : ''}
+                    </td>
                     <td class="p-3.5">
                         <div class="flex items-center gap-2">
                             <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
@@ -1161,6 +1172,75 @@ const DATA_VERSION = 2;
                 });
                 if ([...select.options].some(option => option.value === current)) select.value = current;
             });
+            updateProductSubcategoryField();
+            updateAccessorySubcategoryFilter();
+        }
+
+        function getCategoryName(categoryId) {
+            return CATEGORIES.find(category => category.id === categoryId)?.name || categoryId;
+        }
+
+        function getCaseSubcategoryName(subcategoryId) {
+            return CASE_SUBCATEGORIES.find(subcategory => subcategory.id === subcategoryId)?.name || 'Sin especificar';
+        }
+
+        function normalizeCaseSubcategories() {
+            CASE_SUBCATEGORIES = CASE_SUBCATEGORIES.filter(subcategory => subcategory.id !== 'otro');
+        }
+
+        function updateProductSubcategoryField() {
+            const isCase = document.getElementById('prodCategory').value === 'fundas';
+            const field = document.getElementById('prodSubcategoryField');
+            const select = document.getElementById('prodSubcategory');
+            field.classList.toggle('hidden', !isCase);
+            select.required = isCase;
+            if (!isCase) {
+                select.value = '';
+                document.getElementById('prodCustomSubcategory').value = '';
+            }
+            updateCustomCaseSubcategoryField();
+        }
+
+        function updateCustomCaseSubcategoryField() {
+            const select = document.getElementById('prodSubcategory');
+            const input = document.getElementById('prodCustomSubcategory');
+            const isCustomType = select.value === 'otro';
+            input.classList.toggle('hidden', !isCustomType);
+            input.required = isCustomType;
+            if (!isCustomType) input.value = '';
+        }
+
+        function saveCustomCaseSubcategory(name) {
+            const normalizedName = name.trim();
+            const existing = CASE_SUBCATEGORIES.find(subcategory => subcategory.name.toLowerCase() === normalizedName.toLowerCase());
+            if (existing) return existing.id;
+
+            const baseId = normalizedName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'tipo-funda';
+            let id = baseId;
+            let suffix = 2;
+            while (CASE_SUBCATEGORIES.some(subcategory => subcategory.id === id)) id = `${baseId}-${suffix++}`;
+            CASE_SUBCATEGORIES.push({ id, name: normalizedName });
+            return id;
+        }
+
+        function updateAccessorySubcategoryFilter() {
+            const categoryFilter = document.getElementById('accCategoryFilter');
+            const subcategoryFilter = document.getElementById('accSubcategoryFilter');
+            const current = subcategoryFilter.value;
+            const isCase = categoryFilter.value === 'fundas';
+            subcategoryFilter.innerHTML = '<option value="ALL">Todos los tipos</option>' + CASE_SUBCATEGORIES.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('');
+            if ([...subcategoryFilter.options].some(option => option.value === current)) subcategoryFilter.value = current;
+            subcategoryFilter.disabled = !isCase;
+            subcategoryFilter.classList.toggle('text-slate-400', !isCase);
+            subcategoryFilter.classList.toggle('text-slate-700', isCase);
+            if (!isCase) subcategoryFilter.value = 'ALL';
+        }
+
+        function renderCaseSubcategoryOptions() {
+            const select = document.getElementById('prodSubcategory');
+            const current = select.value;
+            select.innerHTML = '<option value="">Seleccionar tipo de funda</option>' + CASE_SUBCATEGORIES.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('') + '<option value="otro">Otro tipo</option>';
+            if ([...select.options].some(option => option.value === current)) select.value = current;
         }
 
         function renderCategoriesPage() {
@@ -1327,6 +1407,8 @@ const DATA_VERSION = 2;
             document.getElementById('productForm').reset();
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
+            renderCaseSubcategoryOptions();
+            updateProductSubcategoryField();
             document.getElementById('productModal').classList.remove('hidden');
         }
 
@@ -1346,6 +1428,8 @@ const DATA_VERSION = 2;
             const id = document.getElementById('prodId').value || `ACC-${Date.now().toString().slice(-4)}`;
             const title = document.getElementById('prodTitle').value;
             const category = document.getElementById('prodCategory').value;
+            let subcategory = category === 'fundas' ? document.getElementById('prodSubcategory').value : '';
+            if (subcategory === 'otro') subcategory = saveCustomCaseSubcategory(document.getElementById('prodCustomSubcategory').value);
             const brand = document.getElementById('prodBrand').value;
             const stock = parseInt(document.getElementById('prodStock').value) || 0;
             const minStock = parseInt(document.getElementById('prodMinStock').value) || 3;
@@ -1356,7 +1440,7 @@ const DATA_VERSION = 2;
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
-            const productObj = { id, title, category, brand, stock, minStock, cost, price, cashPrice, image, barcode };
+            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode };
 
             const isUpdate = existingIndex > -1;
 
@@ -1370,6 +1454,8 @@ const DATA_VERSION = 2;
                 await saveLocalState();
                 renderDashboard();
                 renderAccTable();
+                renderCaseSubcategoryOptions();
+                updateAccessorySubcategoryFilter();
                 document.getElementById('productForm').reset();
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
@@ -1406,6 +1492,9 @@ const DATA_VERSION = 2;
             document.getElementById('prodId').value = p.id;
             document.getElementById('prodTitle').value = p.title;
             document.getElementById('prodCategory').value = p.category;
+            renderCaseSubcategoryOptions();
+            document.getElementById('prodSubcategory').value = p.subcategory || '';
+            updateProductSubcategoryField();
             document.getElementById('prodBrand').value = p.brand;
             document.getElementById('prodStock').value = p.stock;
             document.getElementById('prodMinStock').value = p.minStock;
@@ -1558,6 +1647,7 @@ const DATA_VERSION = 2;
             localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
             localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
             localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
+            localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
 
             if (!firebase.auth().currentUser) return;
 
@@ -1569,6 +1659,7 @@ const DATA_VERSION = 2;
                     sales: SALES,
                     clients: CLIENTS,
                     categories: CATEGORIES,
+                    caseSubcategories: CASE_SUBCATEGORIES,
                     cashRegister,
                     dailyDollarRate,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1592,6 +1683,9 @@ const DATA_VERSION = 2;
             if (cash) try { cashRegister = JSON.parse(cash); } catch(e){}
             const dollar = localStorage.getItem('bestore_internal_dollar_rate');
             if (dollar) dailyDollarRate = parseFloat(dollar) || 0;
+            const caseSubcategories = localStorage.getItem('bestore_internal_case_subcategories');
+            if (caseSubcategories) try { CASE_SUBCATEGORIES = JSON.parse(caseSubcategories); } catch(e){}
+            normalizeCaseSubcategories();
 
             try {
                 const snapshot = await appStateRef.get();
@@ -1603,6 +1697,8 @@ const DATA_VERSION = 2;
                     SALES = remoteState.sales || SALES;
                     CLIENTS = remoteState.clients || CLIENTS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
+                    CASE_SUBCATEGORIES = remoteState.caseSubcategories || CASE_SUBCATEGORIES;
+                    normalizeCaseSubcategories();
                     cashRegister = remoteState.cashRegister || cashRegister;
                     dailyDollarRate = remoteState.dailyDollarRate || dailyDollarRate;
                     localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
@@ -1611,6 +1707,7 @@ const DATA_VERSION = 2;
                     localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
                     localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
                     localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
+                    localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
                 } else {
                     PRODUCTS = [];
                     PHONES = [];
