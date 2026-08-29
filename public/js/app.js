@@ -112,6 +112,13 @@ let CASE_SUBCATEGORIES = [
     { id: 'silicona', name: 'Silicona' },
     { id: 'dibujos', name: 'Diseños / Dibujos' }
 ];
+const PROTECTION_SUBCATEGORIES = [
+    { id: '9d', name: '9D' },
+    { id: 'antiespia', name: 'Antiespía' },
+    { id: 'matte', name: 'Matte' },
+    { id: 'hidrogel-matte', name: 'Hidrogel Matte' },
+    { id: 'hidrogel-clear-aaa', name: 'Hidrogel Clear AAA' }
+];
 let PHONE_ISSUES = [
     { id: 'pantalla-cambiada', name: 'Pantalla cambiada' },
     { id: 'sin-faceid', name: 'Sin Face ID / Touch ID' },
@@ -503,7 +510,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const filtered = PRODUCTS.filter(p => {
                 const matchesCat = cat === 'ALL' || p.category === cat;
                 const matchesSubcategory = subcategory === 'ALL' || p.subcategory === subcategory;
-                const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search) || getCaseSubcategoryName(p.subcategory).toLowerCase().includes(search);
+                const matchesSearch = p.title.toLowerCase().includes(search) || p.brand.toLowerCase().includes(search) || p.id.toLowerCase().includes(search) || getAccessorySubcategoryName(p.category, p.subcategory).toLowerCase().includes(search);
                 return matchesCat && matchesSubcategory && matchesSearch;
             }).sort((first, second) => {
                 if (sort === 'stock-asc') return first.stock - second.stock || first.title.localeCompare(second.title);
@@ -514,7 +521,8 @@ let IPHONE_TRADE_IN_RATES = [];
             });
 
             if (filtered.length === 0) {
-                body.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">No se encontraron productos en el inventario.</td></tr>`;
+                body.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron productos en el inventario.</td></tr>`;
+                renderAccTableTotals(filtered);
                 return;
             }
 
@@ -525,13 +533,14 @@ let IPHONE_TRADE_IN_RATES = [];
                             <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
-                                <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id} | ${item.brand}</span>
+                                <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id}</span>
                             </div>
                         </div>
                     </td>
+                    <td class="p-3.5 font-semibold text-slate-700">${item.brand}</td>
                     <td class="p-3.5 font-medium text-slate-600">
                         <span class="block">${getCategoryName(item.category)}</span>
-                        ${item.category === 'fundas' ? `<span class="text-[10px] text-brand-600">${getCaseSubcategoryName(item.subcategory)}</span>` : ''}
+                        ${['fundas', 'proteccion'].includes(item.category) ? `<span class="text-[10px] text-brand-600">${getAccessorySubcategoryName(item.category, item.subcategory)}</span>` : ''}
                     </td>
                     <td class="p-3.5">
                         <div class="accessory-stock-cell flex items-center gap-2">
@@ -559,6 +568,20 @@ let IPHONE_TRADE_IN_RATES = [];
                     </td>
                 </tr>
             `).join('');
+            renderAccTableTotals(filtered);
+        }
+
+        function renderAccTableTotals(products) {
+            const totals = products.reduce((result, product) => ({
+                stock: result.stock + product.stock,
+                cost: result.cost + (product.cost * product.stock),
+                sale: result.sale + (product.price * product.stock)
+            }), { stock: 0, cost: 0, sale: 0 });
+            document.getElementById('accTableTotals').innerHTML = `
+                <div><span class="block text-slate-500">Cantidad total</span><strong class="font-mono-num text-sm text-slate-900">${totals.stock} un.</strong></div>
+                <div><span class="block text-slate-500">Valor a costo</span><strong class="font-mono-num text-sm text-slate-900">$${totals.cost.toLocaleString('es-AR')}</strong></div>
+                <div><span class="block text-emerald-700">Valor a precio de lista</span><strong class="font-mono-num text-sm text-emerald-700">$${totals.sale.toLocaleString('es-AR')}</strong></div>
+            `;
         }
 
         /* PHONES TABLE LOGIC */
@@ -1376,17 +1399,30 @@ let IPHONE_TRADE_IN_RATES = [];
             return CASE_SUBCATEGORIES.find(subcategory => subcategory.id === subcategoryId)?.name || 'Sin especificar';
         }
 
+        function getAccessorySubcategories(categoryId) {
+            if (categoryId === 'fundas') return CASE_SUBCATEGORIES;
+            if (categoryId === 'proteccion') return PROTECTION_SUBCATEGORIES;
+            return [];
+        }
+
+        function getAccessorySubcategoryName(categoryId, subcategoryId) {
+            return getAccessorySubcategories(categoryId).find(subcategory => subcategory.id === subcategoryId)?.name || 'Sin especificar';
+        }
+
         function normalizeCaseSubcategories() {
             CASE_SUBCATEGORIES = CASE_SUBCATEGORIES.filter(subcategory => subcategory.id !== 'otro');
         }
 
         function updateProductSubcategoryField() {
-            const isCase = document.getElementById('prodCategory').value === 'fundas';
+            const categoryId = document.getElementById('prodCategory').value;
+            const hasSubcategories = getAccessorySubcategories(categoryId).length > 0;
             const field = document.getElementById('prodSubcategoryField');
             const select = document.getElementById('prodSubcategory');
-            field.classList.toggle('hidden', !isCase);
-            select.required = isCase;
-            if (!isCase) {
+            field.classList.toggle('hidden', !hasSubcategories);
+            select.required = hasSubcategories;
+            document.getElementById('prodSubcategoryLabel').textContent = categoryId === 'proteccion' ? 'Tipo de vidrio templado *' : 'Tipo de funda *';
+            renderAccessorySubcategoryOptions(categoryId);
+            if (!hasSubcategories) {
                 select.value = '';
                 document.getElementById('prodCustomSubcategory').value = '';
             }
@@ -1396,7 +1432,7 @@ let IPHONE_TRADE_IN_RATES = [];
         function updateCustomCaseSubcategoryField() {
             const select = document.getElementById('prodSubcategory');
             const input = document.getElementById('prodCustomSubcategory');
-            const isCustomType = select.value === 'otro';
+            const isCustomType = document.getElementById('prodCategory').value === 'fundas' && select.value === 'otro';
             input.classList.toggle('hidden', !isCustomType);
             input.required = isCustomType;
             if (!isCustomType) input.value = '';
@@ -1419,19 +1455,26 @@ let IPHONE_TRADE_IN_RATES = [];
             const categoryFilter = document.getElementById('accCategoryFilter');
             const subcategoryFilter = document.getElementById('accSubcategoryFilter');
             const current = subcategoryFilter.value;
-            const isCase = categoryFilter.value === 'fundas';
-            subcategoryFilter.innerHTML = '<option value="ALL">Todos los tipos</option>' + CASE_SUBCATEGORIES.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('');
+            const subcategories = getAccessorySubcategories(categoryFilter.value);
+            const hasSubcategories = subcategories.length > 0;
+            subcategoryFilter.innerHTML = '<option value="ALL">Todos los tipos</option>' + subcategories.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('');
             if ([...subcategoryFilter.options].some(option => option.value === current)) subcategoryFilter.value = current;
-            subcategoryFilter.disabled = !isCase;
-            subcategoryFilter.classList.toggle('text-slate-400', !isCase);
-            subcategoryFilter.classList.toggle('text-slate-700', isCase);
-            if (!isCase) subcategoryFilter.value = 'ALL';
+            subcategoryFilter.disabled = !hasSubcategories;
+            subcategoryFilter.classList.toggle('text-slate-400', !hasSubcategories);
+            subcategoryFilter.classList.toggle('text-slate-700', hasSubcategories);
+            if (!hasSubcategories) subcategoryFilter.value = 'ALL';
         }
 
         function renderCaseSubcategoryOptions() {
+            renderAccessorySubcategoryOptions(document.getElementById('prodCategory').value);
+        }
+
+        function renderAccessorySubcategoryOptions(categoryId) {
             const select = document.getElementById('prodSubcategory');
             const current = select.value;
-            select.innerHTML = '<option value="">Seleccionar tipo de funda</option>' + CASE_SUBCATEGORIES.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('') + '<option value="otro">Otro tipo</option>';
+            const subcategories = getAccessorySubcategories(categoryId);
+            const placeholder = categoryId === 'proteccion' ? 'Seleccionar tipo de vidrio' : 'Seleccionar tipo de funda';
+            select.innerHTML = `<option value="">${placeholder}</option>` + subcategories.map(subcategory => `<option value="${subcategory.id}">${subcategory.name}</option>`).join('') + (categoryId === 'fundas' ? '<option value="otro">Otro tipo</option>' : '');
             if ([...select.options].some(option => option.value === current)) select.value = current;
         }
 
@@ -1679,7 +1722,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const id = document.getElementById('prodId').value || `ACC-${Date.now().toString().slice(-4)}`;
             const title = document.getElementById('prodTitle').value;
             const category = document.getElementById('prodCategory').value;
-            let subcategory = category === 'fundas' ? document.getElementById('prodSubcategory').value : '';
+            let subcategory = ['fundas', 'proteccion'].includes(category) ? document.getElementById('prodSubcategory').value : '';
             if (subcategory === 'otro') subcategory = saveCustomCaseSubcategory(document.getElementById('prodCustomSubcategory').value);
             const brand = document.getElementById('prodBrand').value;
             const stock = parseInt(document.getElementById('prodStock').value) || 0;

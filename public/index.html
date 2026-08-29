@@ -521,19 +521,21 @@
                 <!-- Products Data Table -->
                 <div class="custom-card overflow-hidden">
                     <div class="overflow-x-auto">
-                        <table class="min-w-[900px] w-full table-fixed text-left text-xs border-collapse">
+                        <table class="min-w-[1000px] w-full table-fixed text-left text-xs border-collapse">
                             <colgroup>
-                                <col class="w-[24%]">
-                                <col class="w-[16%]">
+                                <col class="w-[21%]">
+                                <col class="w-[12%]">
+                                <col class="w-[15%]">
+                                <col class="w-[10%]">
+                                <col class="w-[12%]">
+                                <col class="w-[12%]">
                                 <col class="w-[11%]">
-                                <col class="w-[13%]">
-                                <col class="w-[13%]">
-                                <col class="w-[14%]">
-                                <col class="w-[9%]">
+                                <col class="w-[7%]">
                             </colgroup>
                             <thead>
                                 <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
                                     <th class="p-3.5">Producto</th>
+                                    <th class="p-3.5">Marca</th>
                                     <th class="p-3.5">Categoría</th>
                                     <th class="p-3.5">Stock</th>
                                     <th class="p-3.5">Costo (USD/ARS)</th>
@@ -546,6 +548,9 @@
                                 <!-- Populated dynamically -->
                             </tbody>
                         </table>
+                    </div>
+                    <div id="accTableTotals" class="grid grid-cols-1 gap-3 border-t border-bonewhite-border bg-slate-50 p-4 text-xs sm:grid-cols-3">
+                        <!-- Populated dynamically -->
                     </div>
                 </div>
 
@@ -789,7 +794,7 @@
                 </div>
 
                 <div id="prodSubcategoryField" class="hidden">
-                    <label class="block font-bold text-slate-700 mb-1">Tipo de funda *</label>
+                    <label id="prodSubcategoryLabel" class="block font-bold text-slate-700 mb-1">Tipo de funda *</label>
                     <select id="prodSubcategory" onchange="updateCustomCaseSubcategoryField()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
                         <option value="">Seleccionar tipo de funda</option>
                         <option value="transparente">Transparente</option>
