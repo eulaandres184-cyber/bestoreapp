@@ -99,7 +99,7 @@ const DATA_VERSION = 2;
             const password = document.getElementById('setupPassword').value;
             try {
                 const credential = await firebase.auth().createUserWithEmailAndPassword(nickEmail(nick), password);
-                await db.collection('users').doc(credential.user.uid).set({ nick, role: 'admin', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                await db.collection('users').doc(credential.user.uid).set({ nick, role: 'admin', active: true, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
                 await finishLogin(credential.user);
             } catch (error) {
                 showAuthMessage(error.message);
@@ -121,6 +121,12 @@ const DATA_VERSION = 2;
             const profile = await db.collection('users').doc(user.uid).get();
             if (!profile.exists) throw new Error('Usuario sin perfil asignado.');
             currentUserProfile = profile.data();
+            if (currentUserProfile.active === false) {
+                await firebase.auth().signOut();
+                currentUserProfile = null;
+                showAuthMessage('Este usuario fue desactivado. Consulte a un administrador.');
+                return;
+            }
             document.getElementById('currentUserName').textContent = `${currentUserProfile.nick} (${currentUserProfile.role === 'admin' ? 'Admin' : 'Vendedor'})`;
             document.getElementById('authScreen').classList.add('hidden');
             await loadLocalState();
@@ -165,13 +171,20 @@ const DATA_VERSION = 2;
 
         function closeUserModal() {
             document.getElementById('userModal').classList.add('hidden');
+            cancelUserEdit();
         }
 
         async function renderUserList() {
+            if (!requireAdmin()) return;
             const snapshot = await db.collection('users').orderBy('nick').get();
             document.getElementById('userList').innerHTML = snapshot.docs.map(doc => {
                 const user = doc.data();
-                return `<div class="flex justify-between bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><span><strong>${user.nick}</strong> · ${user.role}</span><span class="text-slate-400">Registrado</span></div>`;
+                const isCurrentUser = doc.id === firebase.auth().currentUser?.uid;
+                const status = user.active === false ? 'Inactivo' : 'Activo';
+                return `<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs ${user.active === false ? 'opacity-60' : ''}">
+                    <div class="min-w-0"><p class="font-bold text-slate-900 truncate">${user.nick} <span class="font-medium text-slate-500">· ${user.role === 'admin' ? 'Admin' : 'Vendedor'}</span></p><p class="text-[10px] ${user.active === false ? 'text-red-600' : 'text-emerald-600'}">${status}${isCurrentUser ? ' · Tu usuario' : ''}</p></div>
+                    <div class="flex shrink-0 gap-1"><button onclick="startUserEdit('${doc.id}', '${user.nick}', '${user.role}')" class="p-1.5 text-brand-600 hover:bg-brand-50 rounded-lg" title="Editar usuario"><i class="fa-solid fa-pen"></i></button>${!isCurrentUser && user.active !== false ? `<button onclick="deactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Desactivar usuario"><i class="fa-solid fa-user-slash"></i></button>` : user.active === false ? `<button onclick="reactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Reactivar usuario"><i class="fa-solid fa-user-check"></i></button>` : ''}</div>
+                </div>`;
             }).join('');
         }
 
@@ -184,7 +197,7 @@ const DATA_VERSION = 2;
             const secondaryApp = firebase.initializeApp(firebaseConfig, `seller-${Date.now()}`);
             try {
                 const credential = await secondaryApp.auth().createUserWithEmailAndPassword(nickEmail(nick), password);
-                await db.collection('users').doc(credential.user.uid).set({ nick, role, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                await db.collection('users').doc(credential.user.uid).set({ nick, role, active: true, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
                 document.getElementById('newUserNick').value = '';
                 document.getElementById('newUserPassword').value = '';
                 await secondaryApp.delete();
@@ -194,6 +207,53 @@ const DATA_VERSION = 2;
                 await secondaryApp.delete();
                 showToast(error.code === 'auth/email-already-in-use' ? 'Ese nick ya está registrado.' : 'No se pudo registrar el vendedor.');
             }
+        }
+
+        function startUserEdit(userId, nick, role) {
+            if (!requireAdmin()) return;
+            document.getElementById('editingUserId').value = userId;
+            document.getElementById('editingUserNick').textContent = nick;
+            document.getElementById('editingUserRole').value = role;
+            document.getElementById('editUserForm').classList.remove('hidden');
+        }
+
+        function cancelUserEdit() {
+            document.getElementById('editUserForm').classList.add('hidden');
+            document.getElementById('editingUserId').value = '';
+        }
+
+        async function updateUser(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+            const userId = document.getElementById('editingUserId').value;
+            const role = document.getElementById('editingUserRole').value;
+            if (userId === firebase.auth().currentUser?.uid && role !== 'admin') {
+                showToast('No podés quitarte el rol de administrador.');
+                return;
+            }
+            await db.collection('users').doc(userId).update({ role, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            cancelUserEdit();
+            await renderUserList();
+            showToast('Usuario actualizado correctamente.');
+        }
+
+        async function deactivateUser(userId, nick) {
+            if (!requireAdmin()) return;
+            if (userId === firebase.auth().currentUser?.uid) {
+                showToast('No podés desactivar tu propio usuario.');
+                return;
+            }
+            if (!confirm(`¿Desactivar el usuario ${nick}? No podrá ingresar al sistema.`)) return;
+            await db.collection('users').doc(userId).update({ active: false, deactivatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            await renderUserList();
+            showToast('Usuario desactivado.');
+        }
+
+        async function reactivateUser(userId, nick) {
+            if (!requireAdmin()) return;
+            await db.collection('users').doc(userId).update({ active: true, reactivatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            await renderUserList();
+            showToast(`${nick} puede volver a ingresar al sistema.`);
         }
 
         /* CLOCK WIDGET */
@@ -215,6 +275,7 @@ const DATA_VERSION = 2;
                 const navBtn = document.getElementById(`nav-${t}`);
                 const viewSec = document.getElementById(`view-${t}`);
                 if (navBtn) navBtn.classList.remove('active');
+                document.querySelectorAll(`[data-tab-nav="${t}"]`).forEach(button => button.classList.remove('active'));
                 if (viewSec) viewSec.classList.add('hidden');
             });
 
@@ -222,6 +283,7 @@ const DATA_VERSION = 2;
             const activeSec = document.getElementById(`view-${tabId}`);
             
             if (activeBtn) activeBtn.classList.add('active');
+            document.querySelectorAll(`[data-tab-nav="${tabId}"]`).forEach(button => button.classList.add('active'));
             if (activeSec) activeSec.classList.remove('hidden');
 
             // Update Header Title
