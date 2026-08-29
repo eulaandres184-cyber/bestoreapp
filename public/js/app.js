@@ -63,6 +63,13 @@ let CASE_SUBCATEGORIES = [
     { id: 'silicona', name: 'Silicona' },
     { id: 'dibujos', name: 'Diseños / Dibujos' }
 ];
+let PHONE_ISSUES = [
+    { id: 'pantalla-cambiada', name: 'Pantalla cambiada' },
+    { id: 'sin-faceid', name: 'Sin Face ID / Touch ID' },
+    { id: 'tapa-trasera-rota', name: 'Tapa trasera rota' },
+    { id: 'camara-con-detalles', name: 'Cámara con detalles' },
+    { id: 'marcas-de-uso', name: 'Marcas de uso visibles' }
+];
 
 /* Empty initial state: inventory is entered manually by an administrator. */
         let PRODUCTS = [];
@@ -75,10 +82,12 @@ let CASE_SUBCATEGORIES = [
         let posState = {
             ticket: [],
             paymentMethod: 'transfer', // 'transfer' or 'card'
-            selectedCategory: 'ALL'
+            selectedCategory: 'ALL',
+            phoneConditionFilter: 'ALL'
         };
 
         let activeTradeInValuation = 0;
+        let activeTradeInValuationUsd = 0;
         let categoryChartInstance = null;
         let lastCreatedSale = null;
         let productFeedbackTimer = null;
@@ -557,6 +566,7 @@ let CASE_SUBCATEGORIES = [
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${item.condition === 'Nuevo' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'}">
                             ${item.condition}
                         </span>
+                        ${item.issues?.length ? `<p class="mt-1 text-[10px] text-amber-700">${item.issues.map(getPhoneIssueName).join(' · ')}</p>` : ''}
                     </td>
                     <td class="p-3.5 font-mono-num font-bold text-xs ${item.battery >= 85 ? 'text-emerald-600' : 'text-amber-600'}">
                         ${item.battery}%
@@ -604,6 +614,7 @@ let CASE_SUBCATEGORIES = [
 
         function setPOSCategory(catId) {
             posState.selectedCategory = catId;
+            if (catId !== 'celulares') posState.phoneConditionFilter = 'ALL';
             renderPOSCategories();
             renderPOSItemsGrid();
         }
@@ -651,7 +662,7 @@ let CASE_SUBCATEGORIES = [
 
             if (cat === 'ALL' || cat === 'celulares') {
                 PHONES.forEach(ph => {
-                    if (ph.status === 'En Stock') {
+                    if (ph.status === 'En Stock' && (posState.phoneConditionFilter === 'ALL' || ph.condition === posState.phoneConditionFilter)) {
                         const title = `${ph.brand} ${ph.model} ${ph.storage} (${ph.condition})`;
                         if (title.toLowerCase().includes(search) || ph.imei.toLowerCase().includes(search)) {
                             itemsList.push({
@@ -943,6 +954,7 @@ let CASE_SUBCATEGORIES = [
             renderAccTable();
             renderPhonesTable();
             renderSalesTable();
+            posState.phoneConditionFilter = 'ALL';
             renderPOSItemsGrid();
 
             openReceiptModal(saleRecord);
@@ -1127,19 +1139,19 @@ let CASE_SUBCATEGORIES = [
         /* PLAN CANJE ENGINE */
         const CANJE_RATES = {
             'Apple': [
-                { model: 'iPhone 14 Pro Max', base: 850000 },
-                { model: 'iPhone 14 Pro', base: 750000 },
-                { model: 'iPhone 14', base: 580000 },
-                { model: 'iPhone 13 Pro Max', base: 620000 },
-                { model: 'iPhone 13', base: 480000 },
-                { model: 'iPhone 12 Pro', base: 410000 },
-                { model: 'iPhone 12', base: 340000 },
-                { model: 'iPhone 11', base: 260000 }
+                { model: 'iPhone 14 Pro Max', baseUsd: 850 },
+                { model: 'iPhone 14 Pro', baseUsd: 750 },
+                { model: 'iPhone 14', baseUsd: 580 },
+                { model: 'iPhone 13 Pro Max', baseUsd: 620 },
+                { model: 'iPhone 13', baseUsd: 480 },
+                { model: 'iPhone 12 Pro', baseUsd: 410 },
+                { model: 'iPhone 12', baseUsd: 340 },
+                { model: 'iPhone 11', baseUsd: 260 }
             ],
             'Samsung': [
-                { model: 'Galaxy S23 Ultra', base: 720000 },
-                { model: 'Galaxy S22 Ultra', base: 510000 },
-                { model: 'Galaxy S21 FE', base: 280000 }
+                { model: 'Galaxy S23 Ultra', baseUsd: 720 },
+                { model: 'Galaxy S22 Ultra', baseUsd: 510 },
+                { model: 'Galaxy S21 FE', baseUsd: 280 }
             ]
         };
 
@@ -1347,6 +1359,10 @@ let CASE_SUBCATEGORIES = [
         }
 
         function calculateTradeInValue() {
+            if (dailyDollarRate <= 0) {
+                showToast('Carga la cotización del dólar del día para calcular el canje.');
+                return;
+            }
             const brand = document.getElementById('canjeBrandSelect').value;
             const model = document.getElementById('canjeModelSelect').value;
             const storage = document.getElementById('canjeStorageSelect').value;
@@ -1356,29 +1372,35 @@ let CASE_SUBCATEGORIES = [
             const list = CANJE_RATES[brand] || [];
             const item = list.find(m => m.model === model);
             
-            let baseVal = item ? item.base : 200000;
+            let baseValUsd = item ? item.baseUsd : 200;
 
-            if (storage === '256GB') baseVal *= 1.08;
-            if (storage === '512GB') baseVal *= 1.15;
+            if (storage === '256GB') baseValUsd *= 1.08;
+            if (storage === '512GB') baseValUsd *= 1.15;
 
-            if (condition === 'Bueno') baseVal *= 0.90;
-            if (condition === 'Detalles') baseVal *= 0.80;
+            if (condition === 'Bueno') baseValUsd *= 0.90;
+            if (condition === 'Detalles') baseValUsd *= 0.80;
 
-            if (battery < 80) baseVal *= 0.88;
-            else if (battery < 85) baseVal *= 0.94;
+            if (battery < 80) baseValUsd *= 0.88;
+            else if (battery < 85) baseValUsd *= 0.94;
 
-            activeTradeInValuation = Math.round(baseVal / 1000) * 1000;
+            activeTradeInValuationUsd = Math.round(baseValUsd);
+            activeTradeInValuation = Math.round(activeTradeInValuationUsd * dailyDollarRate / 1000) * 1000;
 
-            document.getElementById('canjeValuationResult').textContent = `$${activeTradeInValuation.toLocaleString('es-AR')}`;
+            document.getElementById('canjeValuationResult').textContent = `USD ${activeTradeInValuationUsd.toLocaleString('en-US')}`;
+            document.getElementById('canjeValuationArs').textContent = `$${activeTradeInValuation.toLocaleString('es-AR')} ARS`;
+            document.getElementById('canjeValuationRate').textContent = `Cotización del dólar: $${dailyDollarRate.toLocaleString('es-AR')} ARS`;
             document.getElementById('canjeResultCard').classList.remove('hidden');
         }
 
         function applyCanjeToPOS() {
             if (activeTradeInValuation <= 0) return;
             switchTab('pos');
+            document.getElementById('posSearchInput').value = '';
+            posState.phoneConditionFilter = 'Nuevo';
+            setPOSCategory('celulares');
             document.getElementById('posCanjeDeduction').value = activeTradeInValuation;
             calculatePOSTotals();
-            showToast(`¡$${activeTradeInValuation.toLocaleString('es-AR')} cargados como descuento de Canje en Caja!`);
+            showToast(`$${activeTradeInValuation.toLocaleString('es-AR')} cargados como descuento. Selecciona un celular nuevo en stock.`);
         }
 
         function intakeUsedPhoneFromCanje() {
@@ -1393,10 +1415,12 @@ let CASE_SUBCATEGORIES = [
             openPhoneModal();
             document.getElementById('phoneBrand').value = brand;
             document.getElementById('phoneModel').value = model;
-            document.getElementById('phoneCondition').value = `Usado ${condition}`;
+            document.getElementById('phoneCondition').value = condition === 'Detalles' ? 'Usado con detalles' : `Usado ${condition}`;
             document.getElementById('phoneBattery').value = battery;
             document.getElementById('phoneStorage').value = storage;
-            document.getElementById('phonePrice').value = Math.round(activeTradeInValuation * 1.25);
+            document.getElementById('phoneCurrency').value = 'USD';
+            document.getElementById('phonePrice').value = Math.round(activeTradeInValuationUsd * 1.25);
+            updatePhonePriceLabel();
             showToast("Ficha de Smartphone pre-completada con la cotización.");
         }
 
@@ -1535,6 +1559,8 @@ let CASE_SUBCATEGORIES = [
             document.getElementById('phoneForm').reset();
             document.getElementById('phoneId').value = '';
             document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
+            renderPhoneIssueOptions();
+            updatePhoneIssuesField();
             document.getElementById('phoneModal').classList.remove('hidden');
         }
 
@@ -1570,6 +1596,45 @@ let CASE_SUBCATEGORIES = [
             return !duplicate;
         }
 
+        function getPhoneIssueName(issueId) {
+            return PHONE_ISSUES.find(issue => issue.id === issueId)?.name || issueId;
+        }
+
+        function renderPhoneIssueOptions(selectedIssues = []) {
+            const container = document.getElementById('phoneIssuesOptions');
+            container.innerHTML = PHONE_ISSUES.map(issue => `
+                <label class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-[11px] text-slate-700">
+                    <input type="checkbox" name="phoneIssues" value="${issue.id}" ${selectedIssues.includes(issue.id) ? 'checked' : ''} class="accent-amber-600">
+                    <span>${issue.name}</span>
+                </label>
+            `).join('');
+        }
+
+        function updatePhoneIssuesField() {
+            const isUsed = document.getElementById('phoneCondition').value.includes('Usado');
+            document.getElementById('phoneIssuesField').classList.toggle('hidden', !isUsed);
+        }
+
+        async function addCustomPhoneIssue() {
+            const input = document.getElementById('phoneCustomIssue');
+            const name = input.value.trim();
+            if (!name) return;
+            const selectedIssues = [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(checkbox => checkbox.value);
+            const existing = PHONE_ISSUES.find(issue => issue.name.toLowerCase() === name.toLowerCase());
+            if (!existing) {
+                const baseId = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'detalle-equipo';
+                let id = baseId;
+                let suffix = 2;
+                while (PHONE_ISSUES.some(issue => issue.id === id)) id = `${baseId}-${suffix++}`;
+                PHONE_ISSUES.push({ id, name });
+                await saveLocalState();
+                renderPhoneIssueOptions([...selectedIssues, id]);
+            } else {
+                renderPhoneIssueOptions([...selectedIssues, existing.id]);
+            }
+            input.value = '';
+        }
+
         function savePhoneUnit(e) {
             e.preventDefault();
             if (!requireAdmin()) return;
@@ -1591,13 +1656,14 @@ let CASE_SUBCATEGORIES = [
             const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
             const image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
+            const issues = condition.includes('Usado') ? [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(input => input.value) : [];
 
             if (!validatePhoneImei()) {
                 showToast('No se puede guardar: el IMEI ya está registrado.');
                 return;
             }
 
-            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image };
+            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image, issues };
             const existingIndex = PHONES.findIndex(p => p.id === id);
 
             if (existingIndex > -1) {
@@ -1623,11 +1689,12 @@ let CASE_SUBCATEGORIES = [
             document.getElementById('phoneBrand').value = ph.brand;
             document.getElementById('phoneModel').value = ph.model;
             document.getElementById('phoneCondition').value = ph.condition;
+            renderPhoneIssueOptions(ph.issues || []);
+            updatePhoneIssuesField();
             document.getElementById('phoneBattery').value = ph.battery;
             document.getElementById('phoneStorage').value = ph.storage;
             document.getElementById('phoneColor').value = ph.color;
             document.getElementById('phoneImei').value = ph.imei;
-            document.getElementById('phonePrice').value = ph.price;
             document.getElementById('phoneCurrency').value = ph.currency || 'ARS';
             document.getElementById('phonePrice').value = ph.currency === 'USD' ? ph.priceUsd : ph.price;
             updatePhonePriceLabel();
@@ -1648,6 +1715,7 @@ let CASE_SUBCATEGORIES = [
             localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
             localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
             localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
+            localStorage.setItem('bestore_internal_phone_issues', JSON.stringify(PHONE_ISSUES));
 
             if (!firebase.auth().currentUser) return;
 
@@ -1660,6 +1728,7 @@ let CASE_SUBCATEGORIES = [
                     clients: CLIENTS,
                     categories: CATEGORIES,
                     caseSubcategories: CASE_SUBCATEGORIES,
+                    phoneIssues: PHONE_ISSUES,
                     cashRegister,
                     dailyDollarRate,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1685,6 +1754,8 @@ let CASE_SUBCATEGORIES = [
             if (dollar) dailyDollarRate = parseFloat(dollar) || 0;
             const caseSubcategories = localStorage.getItem('bestore_internal_case_subcategories');
             if (caseSubcategories) try { CASE_SUBCATEGORIES = JSON.parse(caseSubcategories); } catch(e){}
+            const phoneIssues = localStorage.getItem('bestore_internal_phone_issues');
+            if (phoneIssues) try { PHONE_ISSUES = JSON.parse(phoneIssues); } catch(e){}
             normalizeCaseSubcategories();
 
             try {
@@ -1698,6 +1769,7 @@ let CASE_SUBCATEGORIES = [
                     CLIENTS = remoteState.clients || CLIENTS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
                     CASE_SUBCATEGORIES = remoteState.caseSubcategories || CASE_SUBCATEGORIES;
+                    PHONE_ISSUES = remoteState.phoneIssues || PHONE_ISSUES;
                     normalizeCaseSubcategories();
                     cashRegister = remoteState.cashRegister || cashRegister;
                     dailyDollarRate = remoteState.dailyDollarRate || dailyDollarRate;
@@ -1708,6 +1780,7 @@ let CASE_SUBCATEGORIES = [
                     localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
                     localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
                     localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
+                    localStorage.setItem('bestore_internal_phone_issues', JSON.stringify(PHONE_ISSUES));
                 } else {
                     PRODUCTS = [];
                     PHONES = [];

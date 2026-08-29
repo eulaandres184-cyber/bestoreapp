@@ -585,7 +585,7 @@
                             <thead>
                                 <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
                                     <th class="p-3.5">Modelo / Smartphone</th>
-                                    <th class="p-3.5">Condición</th>
+                                    <th class="p-3.5">Condición / Detalles</th>
                                     <th class="p-3.5">Batería %</th>
                                     <th class="p-3.5">Capacidad / Color</th>
                                     <th class="p-3.5">IMEI / Nro Serie</th>
@@ -692,7 +692,9 @@
                             <h3 class="font-bold text-slate-900 text-sm mb-2">Resultado de la Cotización</h3>
                             <div id="canjeResultCard" class="hidden bg-white border border-emerald-300 p-5 rounded-2xl shadow-sm text-center space-y-3">
                                 <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Crédito a favor para el cliente</span>
-                                <div id="canjeValuationResult" class="text-3xl font-black font-mono-num text-emerald-600">$0</div>
+                                <div id="canjeValuationResult" class="text-3xl font-black font-mono-num text-emerald-600">USD 0</div>
+                                <p id="canjeValuationArs" class="text-sm font-bold font-mono-num text-slate-800">$0 ARS</p>
+                                <p id="canjeValuationRate" class="text-[10px] text-slate-500">Cotización del dólar: $0 ARS</p>
                                 <p class="text-xs text-slate-600">Monto sugerido para tomar en parte de pago o descontar en la caja POS.</p>
                                 
                                 <div class="pt-2 flex gap-2">
@@ -867,10 +869,11 @@
                 <div class="grid grid-cols-3 gap-3">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">Condición *</label>
-                        <select id="phoneCondition" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
+                        <select id="phoneCondition" required onchange="updatePhoneIssuesField()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold">
                             <option value="Nuevo">Nuevo Sellado</option>
                             <option value="Usado Excelente">Usado Excelente</option>
                             <option value="Usado Bueno">Usado Bueno</option>
+                            <option value="Usado con detalles">Usado con detalles</option>
                         </select>
                     </div>
                     <div>
@@ -897,6 +900,15 @@
                         <label class="block font-bold text-slate-700 mb-1">Nro Serie / IMEI *</label>
                         <input type="text" id="phoneImei" placeholder="3589..." required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono-num font-bold">
                         <p id="phoneImeiFeedback" class="mt-1 text-[10px] font-semibold text-slate-500"></p>
+                    </div>
+                </div>
+
+                <div id="phoneIssuesField" class="hidden rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <label class="block font-bold text-amber-900 mb-2">Detalles técnicos o estéticos</label>
+                    <div id="phoneIssuesOptions" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+                    <div class="mt-3 flex gap-2">
+                        <input type="text" id="phoneCustomIssue" placeholder="Agregar otro detalle" class="flex-1 bg-white border border-amber-200 rounded-xl p-2 text-xs">
+                        <button type="button" onclick="addCustomPhoneIssue()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 rounded-xl text-xs" title="Agregar detalle"><i class="fa-solid fa-plus"></i></button>
                     </div>
                 </div>
 
