@@ -4,21 +4,70 @@ tailwind.config = {
         extend: {
             colors: {
                 bonewhite: {
-                    50: '#fcfbf9',
-                    100: '#f7f6f2',
-                    200: '#eeebe3',
-                    300: '#e2ddcf',
-                    border: '#e5e2d8'
+                    50: '#fffdfa',
+                    100: '#f5ebe1',
+                    200: '#edddcc',
+                    300: '#dfc9b5',
+                    border: '#edddcc'
+                },
+                slate: {
+                    50: '#fffdfa',
+                    100: '#f5ebe1',
+                    200: '#edddcc',
+                    300: '#dfc9b5',
+                    400: '#9c907f',
+                    500: '#647262',
+                    600: '#386046',
+                    700: '#1e4a32',
+                    800: '#0d4b2f',
+                    900: '#003223'
                 },
                 brand: {
-                    50: '#eef2ff',
-                    100: '#e0e7ff',
-                    500: '#4f46e5',
-                    600: '#4338ca',
-                    700: '#3730a3',
-                    accent: '#0284c7',
-                    emerald: '#059669',
-                    amber: '#d97706'
+                    50: '#fff0e5',
+                    100: '#ffe0c7',
+                    500: '#ff7c29',
+                    600: '#ff6400',
+                    700: '#d85300',
+                    accent: '#ff6400',
+                    emerald: '#8cc850',
+                    amber: '#ff6400'
+                },
+                emerald: {
+                    50: '#eff8e7',
+                    100: '#ddf0cc',
+                    200: '#c5e7a9',
+                    300: '#a9d77c',
+                    500: '#8cc850',
+                    600: '#75ad3d',
+                    700: '#5b8e2e',
+                    800: '#3f6d23',
+                    900: '#003223'
+                },
+                purple: {
+                    50: '#eff8e7',
+                    100: '#ddf0cc',
+                    500: '#8cc850',
+                    600: '#75ad3d',
+                    700: '#5b8e2e',
+                    800: '#3f6d23'
+                },
+                amber: {
+                    50: '#fff0e5',
+                    100: '#ffe0c7',
+                    200: '#ffc18f',
+                    300: '#ffa45d',
+                    500: '#ff7c29',
+                    600: '#ff6400',
+                    700: '#d85300',
+                    800: '#a94000',
+                    900: '#003223'
+                },
+                indigo: {
+                    50: '#eff8e7',
+                    500: '#8cc850',
+                    600: '#75ad3d',
+                    700: '#5b8e2e',
+                    800: '#3f6d23'
                 },
                 slatecard: '#ffffff'
             },
@@ -70,6 +119,7 @@ let PHONE_ISSUES = [
     { id: 'camara-con-detalles', name: 'Cámara con detalles' },
     { id: 'marcas-de-uso', name: 'Marcas de uso visibles' }
 ];
+let IPHONE_TRADE_IN_RATES = [];
 
 /* Empty initial state: inventory is entered manually by an administrator. */
         let PRODUCTS = [];
@@ -86,6 +136,8 @@ let PHONE_ISSUES = [
             phoneConditionFilter: 'ALL'
         };
 
+        let pendingSaleId = null;
+        let posOperationInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
         let categoryChartInstance = null;
@@ -167,6 +219,7 @@ let PHONE_ISSUES = [
             renderCategorySelects();
             renderCategoriesPage();
             renderClients();
+            await loadIphoneTradeInRates();
             updateCanjeModelOptions();
         }
 
@@ -494,7 +547,7 @@ let PHONE_ISSUES = [
             body.innerHTML = filtered.map(item => `
                 <tr class="hover:bg-slate-50 transition ${item.status === 'Vendido' ? 'opacity-50 bg-slate-100' : ''}">
                     <td class="p-3.5">
-                        <div class="flex items-center gap-3">
+                        <div class="accessory-product-cell flex items-center gap-3">
                             <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
@@ -507,7 +560,7 @@ let PHONE_ISSUES = [
                         ${item.category === 'fundas' ? `<span class="text-[10px] text-brand-600">${getCaseSubcategoryName(item.subcategory)}</span>` : ''}
                     </td>
                     <td class="p-3.5">
-                        <div class="flex items-center gap-2">
+                        <div class="accessory-stock-cell flex items-center gap-2">
                             <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
                                 ${item.stock} un.
                             </span>
@@ -734,11 +787,11 @@ let PHONE_ISSUES = [
             const existingIndex = posState.ticket.findIndex(t => t.id === id);
 
             if (existingIndex > -1) {
-                if (foundItem.type === 'phone') {
+                if (type === 'phone') {
                     showToast("Este celular único ya está cargado en el ticket.");
                     return;
                 }
-                if (posState.ticket[existingIndex].quantity < foundItem.stock) {
+                if (foundItem.stock > 0) {
                     posState.ticket[existingIndex].quantity += 1;
                 } else {
                     showToast("No hay más unidades en stock disponible.");
@@ -751,13 +804,21 @@ let PHONE_ISSUES = [
                     price: foundItem.price,
                     cashPrice: foundItem.cashPrice,
                     quantity: 1,
-                    type: foundItem.type,
+                    type,
                     imei: foundItem.imei || null,
-                    maxStock: foundItem.type === 'acc' ? foundItem.stock : 1
+                    maxStock: type === 'acc' ? foundItem.stock : 1
                 });
             }
 
+            if (!reservePOSItem(foundItem.id, type, 1)) {
+                if (existingIndex > -1) posState.ticket[existingIndex].quantity -= 1;
+                else posState.ticket.pop();
+                return;
+            }
             renderPOSTicket();
+            renderPOSItemsGrid();
+            renderAccTable();
+            renderPhonesTable();
             showToast(`"${foundItem.title.substring(0, 20)}..." agregado a la caja`);
         }
 
@@ -769,18 +830,56 @@ let PHONE_ISSUES = [
         function updatePOSTicketQty(id, delta) {
             const index = posState.ticket.findIndex(t => t.id === id);
             if (index > -1) {
-                posState.ticket[index].quantity += delta;
+                const item = posState.ticket[index];
+                if (delta > 0 && !reservePOSItem(id, item.type, 1)) return;
+                if (delta < 0) releasePOSItem(id, item.type, Math.min(item.quantity, Math.abs(delta)));
+                item.quantity += delta;
                 if (posState.ticket[index].quantity <= 0) {
                     posState.ticket.splice(index, 1);
                 }
             }
             renderPOSTicket();
+            renderPOSItemsGrid();
+            renderAccTable();
+            renderPhonesTable();
         }
 
         function clearPOSTicket() {
+            posState.ticket.forEach(item => releasePOSItem(item.id, item.type, item.quantity));
             posState.ticket = [];
             document.getElementById('posCanjeDeduction').value = '';
             renderPOSTicket();
+            renderPOSItemsGrid();
+            renderAccTable();
+            renderPhonesTable();
+        }
+
+        function reservePOSItem(id, type, quantity) {
+            if (type === 'acc') {
+                const product = PRODUCTS.find(item => item.id === id);
+                if (!product || product.stock < quantity) {
+                    showToast('No hay más unidades en stock disponible.');
+                    return false;
+                }
+                product.stock -= quantity;
+            } else {
+                const phone = PHONES.find(item => item.id === id);
+                if (!phone || phone.status !== 'En Stock') return false;
+                phone.status = 'Reservado';
+            }
+            saveLocalState();
+            return true;
+        }
+
+        function releasePOSItem(id, type, quantity) {
+            if (type === 'acc') {
+                const product = PRODUCTS.find(item => item.id === id);
+                if (product) product.stock += quantity;
+            } else {
+                const phone = PHONES.find(item => item.id === id);
+                if (phone?.status === 'Reservado') phone.status = 'En Stock';
+            }
+            saveLocalState();
         }
 
         function setPOSPaymentMethod(method) {
@@ -788,6 +887,7 @@ let PHONE_ISSUES = [
             const btnTransf = document.getElementById('posPayTransfer');
             const btnCard = document.getElementById('posPayCard');
             const btnMixed = document.getElementById('posPayMixed');
+            const btnAccount = document.getElementById('posPayAccount');
             const mixedFields = document.getElementById('mixedPaymentFields');
             posState.paymentMethod = method;
 
@@ -797,18 +897,28 @@ let PHONE_ISSUES = [
                 btnTransf.className = 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition';
                 btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
                 btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             } else if (method === 'mixed') {
                 document.getElementById('cardPlanSelect').classList.remove('hidden');
                 mixedFields.classList.remove('hidden');
                 btnMixed.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
                 btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
                 btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            } else if (method === 'account') {
+                document.getElementById('cardPlanSelect').classList.add('hidden');
+                mixedFields.classList.add('hidden');
+                btnAccount.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
+                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             } else {
                 document.getElementById('cardPlanSelect').classList.remove('hidden');
                 mixedFields.classList.add('hidden');
                 btnCard.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
                 btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
                 btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             }
 
             calculatePOSTotals();
@@ -885,6 +995,7 @@ let PHONE_ISSUES = [
         }
 
         function processPOSCheckout() {
+            if (posOperationInProgress || pendingSaleId) return;
             if (posState.ticket.length === 0) {
                 showToast("Cargá al menos un producto al ticket antes de cobrar.");
                 return;
@@ -892,6 +1003,10 @@ let PHONE_ISSUES = [
 
             const customerName = document.getElementById('posCustomerName').value.trim() || 'Cliente Mostrador';
             const customerPhone = document.getElementById('posCustomerPhone').value.trim() || '-';
+            if (posState.paymentMethod === 'account' && customerName === 'Cliente Mostrador') {
+                showToast('Selecciona o carga un cliente para registrar una venta en cuenta corriente.');
+                return;
+            }
             const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
 
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -906,30 +1021,23 @@ let PHONE_ISSUES = [
                 showToast('El pago mixto debe completar el importe a cobrar.');
                 return;
             }
-            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : netTotal;
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'account' ? 0 : netTotal;
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             let total = netTotal + surcharge;
 
-            // Deduct Stock
-            posState.ticket.forEach(tItem => {
-                if (tItem.type === 'acc') {
-                    const acc = PRODUCTS.find(p => p.id === tItem.id);
-                    if (acc) acc.stock = Math.max(0, acc.stock - tItem.quantity);
-                } else if (tItem.type === 'phone') {
-                    const phone = PHONES.find(p => p.id === tItem.id);
-                    if (phone) phone.status = 'Vendido';
-                }
-            });
-
-            // Record Sale Transaction
+            posOperationInProgress = true;
+            const checkoutButton = document.getElementById('posCheckoutButton');
+            checkoutButton.disabled = true;
+            checkoutButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Preparando comprobante...</span>';
             const saleRecord = {
                 id: `TK-${Date.now().toString().slice(-5)}`,
                 date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
                 customerName: customerName,
                 customerPhone: customerPhone,
-                items: [...posState.ticket],
-                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : 'Tarjeta/Cuotas',
+                items: posState.ticket.map(item => ({ ...item })),
+                status: 'Pendiente de emisión',
+                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : posState.paymentMethod === 'account' ? 'Cuenta corriente' : 'Tarjeta/Cuotas',
                 paymentBreakdown: { cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'transfer' ? total : 0, card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0 },
                 cardCommission: cardCharges.commission,
                 cardCommissionVat: cardCharges.vat,
@@ -945,8 +1053,12 @@ let PHONE_ISSUES = [
                 client = { id: `CLI-${Date.now()}`, name: customerName, phone: customerPhone === '-' ? '' : customerPhone, email: '', purchaseCount: 0 };
                 CLIENTS.push(client);
             }
-            if (client) client.purchaseCount = (client.purchaseCount || 0) + 1;
+            if (client) {
+                client.purchaseCount = (client.purchaseCount || 0) + 1;
+                if (posState.paymentMethod === 'account') client.accountBalance = (client.accountBalance || 0) + total;
+            }
             lastCreatedSale = saleRecord;
+            pendingSaleId = saleRecord.id;
             saveLocalState();
 
             // Refresh UI
@@ -954,12 +1066,10 @@ let PHONE_ISSUES = [
             renderAccTable();
             renderPhonesTable();
             renderSalesTable();
-            posState.phoneConditionFilter = 'ALL';
             renderPOSItemsGrid();
 
             openReceiptModal(saleRecord);
-            clearPOSTicket();
-            showToast("¡Venta finalizada y registrada correctamente!");
+            showToast('Comprobante listo. Imprime, envía por WhatsApp o cancela la venta.');
         }
 
         function cashRegisterDate() {
@@ -968,7 +1078,7 @@ let PHONE_ISSUES = [
 
         function renderCashRegister() {
             const today = cashRegisterDate();
-            const todaySales = SALES.filter(sale => sale.date.includes(today) && sale.status !== 'Anulada');
+            const todaySales = SALES.filter(sale => sale.date.includes(today) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
             const totals = todaySales.reduce((result, sale) => {
                 const breakdown = sale.paymentBreakdown || {
                     cash: sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total,
@@ -1007,7 +1117,7 @@ let PHONE_ISSUES = [
                 showToast('No hay una caja abierta para cerrar.');
                 return;
             }
-            const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada');
+            const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
             const cashSales = todaySales.reduce((sum, sale) => sum + (sale.paymentBreakdown?.cash || (sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total)), 0);
             const expectedAmount = cashRegister.openingCash + cashSales;
             const expected = `$${expectedAmount.toLocaleString('es-AR')}`;
@@ -1034,7 +1144,7 @@ let PHONE_ISSUES = [
             }
 
             body.innerHTML = SALES.map(sale => `
-                <tr class="hover:bg-slate-50 transition ${sale.status === 'Anulada' ? 'opacity-50 bg-red-50' : ''}">
+                <tr class="hover:bg-slate-50 transition ${sale.status === 'Anulada' ? 'opacity-50 bg-red-50' : sale.status === 'Pendiente de emisión' ? 'bg-amber-50' : ''}">
                     <td class="p-3.5">
                         <span class="font-bold text-slate-900 block font-mono-num">${sale.id}</span>
                         <span class="text-[10px] text-slate-400">${sale.date}</span>
@@ -1049,7 +1159,7 @@ let PHONE_ISSUES = [
                         </div>
                     </td>
                     <td class="p-3.5 font-semibold text-slate-700">${sale.paymentMethod}</td>
-                    <td class="p-3.5 font-bold font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')} ${sale.status === 'Anulada' ? '<span class="block text-[10px] no-underline">ANULADA</span>' : ''}</td>
+                    <td class="p-3.5 font-bold font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')} ${sale.status === 'Anulada' ? '<span class="block text-[10px] no-underline">ANULADA</span>' : sale.status === 'Pendiente de emisión' ? '<span class="block text-[10px] text-amber-700 no-underline">PENDIENTE</span>' : sale.paymentMethod === 'Cuenta corriente' ? '<span class="block text-[10px] text-slate-500 no-underline">A CUENTA</span>' : ''}</td>
                     <td class="p-3.5 text-center">
                         <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
                             <i class="fa-solid fa-receipt"></i>
@@ -1065,6 +1175,11 @@ let PHONE_ISSUES = [
             if (!requireAdmin()) return;
             const sale = SALES.find(item => item.id === saleId);
             if (!sale || sale.status === 'Anulada') return;
+            if (sale.status === 'Pendiente de emisión') {
+                pendingSaleId = sale.id;
+                await cancelPendingSale();
+                return;
+            }
             sale.items.forEach(item => {
                 if (item.type === 'acc') {
                     const product = PRODUCTS.find(productItem => productItem.id === item.id);
@@ -1075,8 +1190,16 @@ let PHONE_ISSUES = [
                 }
             });
             sale.status = 'Anulada';
+            if (sale.paymentMethod === 'Cuenta corriente') {
+                const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
+                if (client) client.accountBalance = Math.max(0, (client.accountBalance || 0) - sale.total);
+            }
             await saveLocalState();
             renderSalesTable();
+            renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
             showToast('Venta anulada. Se conserva en el historial.');
         }
 
@@ -1091,10 +1214,14 @@ let PHONE_ISSUES = [
 
         function reprintReceipt(saleId) {
             const sale = SALES.find(s => s.id === saleId);
-            if (sale) openReceiptModal(sale);
+            if (sale) {
+                if (sale.status === 'Pendiente de emisión') pendingSaleId = sale.id;
+                openReceiptModal(sale);
+            }
         }
 
         function openReceiptModal(sale) {
+            lastCreatedSale = sale;
             document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | Ticket: ${sale.id}`;
             document.getElementById('receiptCustomerInfo').innerHTML = `
                 <div><strong>Cliente:</strong> ${sale.customerName}</div>
@@ -1115,14 +1242,75 @@ let PHONE_ISSUES = [
             totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
+            document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
             document.getElementById('receiptModal').classList.remove('hidden');
         }
 
         function closeReceiptModal() {
+            if (pendingSaleId) {
+                cancelPendingSale();
+                return;
+            }
             document.getElementById('receiptModal').classList.add('hidden');
         }
 
-        function sendReceiptViaWhatsApp() {
+        async function finalizePendingSale(deliveryMethod) {
+            const sale = SALES.find(item => item.id === pendingSaleId);
+            if (!sale || sale.status !== 'Pendiente de emisión' || posOperationInProgress === false) return;
+            sale.status = 'Confirmada';
+            sale.deliveryMethod = deliveryMethod;
+            await saveLocalState();
+            pendingSaleId = null;
+            posState.ticket = [];
+            document.getElementById('posCanjeDeduction').value = '';
+            document.getElementById('posCustomerName').value = '';
+            document.getElementById('posCustomerPhone').value = '';
+            posState.phoneConditionFilter = 'ALL';
+            posOperationInProgress = false;
+            const checkoutButton = document.getElementById('posCheckoutButton');
+            checkoutButton.disabled = false;
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            renderPOSTicket();
+            renderDashboard();
+            renderSalesTable();
+            renderCashRegister();
+            document.getElementById('receiptModal').classList.add('hidden');
+            showToast('Venta confirmada y stock actualizado.');
+        }
+
+        async function cancelPendingSale() {
+            const sale = SALES.find(item => item.id === pendingSaleId);
+            if (!sale || sale.status !== 'Pendiente de emisión') return;
+            sale.items.forEach(item => releasePOSItem(item.id, item.type, item.quantity));
+            const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
+            if (client) {
+                client.purchaseCount = Math.max(0, (client.purchaseCount || 1) - 1);
+                if (sale.paymentMethod === 'Cuenta corriente') client.accountBalance = Math.max(0, (client.accountBalance || 0) - sale.total);
+            }
+            SALES = SALES.filter(item => item.id !== sale.id);
+            pendingSaleId = null;
+            posState.ticket = [];
+            posOperationInProgress = false;
+            const checkoutButton = document.getElementById('posCheckoutButton');
+            checkoutButton.disabled = false;
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            await saveLocalState();
+            renderPOSTicket();
+            renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            renderSalesTable();
+            document.getElementById('receiptModal').classList.add('hidden');
+            showToast('Venta cancelada. Se restauró el stock reservado.');
+        }
+
+        async function printReceipt() {
+            window.print();
+            if (pendingSaleId) await finalizePendingSale('Impreso');
+        }
+
+        async function sendReceiptViaWhatsApp() {
             if (!lastCreatedSale) return;
 
             let msg = 'BE STORE - COMPROBANTE DE COMPRA\n';
@@ -1134,40 +1322,53 @@ let PHONE_ISSUES = [
             msg += '\nTotal Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + '\n';
             msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + '\n\nGracias por elegir BE STORE! @bestoreok';
             window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+            if (pendingSaleId) await finalizePendingSale('WhatsApp');
         }
 
         /* PLAN CANJE ENGINE */
-        const CANJE_RATES = {
-            'Apple': [
-                { model: 'iPhone 14 Pro Max', baseUsd: 850 },
-                { model: 'iPhone 14 Pro', baseUsd: 750 },
-                { model: 'iPhone 14', baseUsd: 580 },
-                { model: 'iPhone 13 Pro Max', baseUsd: 620 },
-                { model: 'iPhone 13', baseUsd: 480 },
-                { model: 'iPhone 12 Pro', baseUsd: 410 },
-                { model: 'iPhone 12', baseUsd: 340 },
-                { model: 'iPhone 11', baseUsd: 260 }
-            ],
-            'Samsung': [
-                { model: 'Galaxy S23 Ultra', baseUsd: 720 },
-                { model: 'Galaxy S22 Ultra', baseUsd: 510 },
-                { model: 'Galaxy S21 FE', baseUsd: 280 }
-            ]
-        };
+        async function loadIphoneTradeInRates() {
+            try {
+                const response = await fetch('js/iphone-trade-in-rates.json');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                if (!Array.isArray(data.rates) || data.rates.length === 0) throw new Error('La tabla no contiene cotizaciones.');
+                IPHONE_TRADE_IN_RATES = data.rates;
+            } catch (error) {
+                console.error('No se pudo cargar la tabla de cotizaciones de iPhone.', error);
+                showToast('No se pudo cargar la tabla de cotizaciones de iPhone.');
+            }
+        }
 
         function updateCanjeModelOptions() {
-            const brand = document.getElementById('canjeBrandSelect').value;
             const modelSelect = document.getElementById('canjeModelSelect');
+            const currentModel = modelSelect.value;
             modelSelect.innerHTML = '';
+            [...new Set(IPHONE_TRADE_IN_RATES.map(rate => rate.model))].forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                modelSelect.appendChild(option);
+            });
+            if ([...modelSelect.options].some(option => option.value === currentModel)) modelSelect.value = currentModel;
+            modelSelect.onchange = updateCanjeStorageOptions;
+            updateCanjeStorageOptions();
+        }
 
-            if (CANJE_RATES[brand]) {
-                CANJE_RATES[brand].forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m.model;
-                    opt.textContent = m.model;
-                    modelSelect.appendChild(opt);
+        function updateCanjeStorageOptions() {
+            const model = document.getElementById('canjeModelSelect').value;
+            const storageSelect = document.getElementById('canjeStorageSelect');
+            const currentStorage = storageSelect.value;
+            storageSelect.innerHTML = '';
+            IPHONE_TRADE_IN_RATES
+                .filter(rate => rate.model === model)
+                .sort((first, second) => first.storageGb - second.storageGb)
+                .forEach(rate => {
+                    const option = document.createElement('option');
+                    option.value = rate.storageGb;
+                    option.textContent = `${rate.storageGb} GB`;
+                    storageSelect.appendChild(option);
                 });
-            }
+            if ([...storageSelect.options].some(option => option.value === currentStorage)) storageSelect.value = currentStorage;
         }
 
         function renderCategorySelects() {
@@ -1286,7 +1487,7 @@ let PHONE_ISSUES = [
             const body = document.getElementById('clientsTableBody');
             if (!body) return;
             document.getElementById('clientsOptions').innerHTML = CLIENTS.map(client => `<option value="${client.name}">`).join('');
-            body.innerHTML = CLIENTS.map(client => `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${client.phone || '-'}${client.email ? ` · ${client.email}` : ''}</td><td class="p-3">${client.purchaseCount || 0}</td></tr>`).join('') || '<tr><td colspan="3" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
+            body.innerHTML = CLIENTS.map(client => `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${client.phone || '-'}${client.email ? ` · ${client.email}` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Cuenta corriente: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
         }
 
         async function saveClient(event) {
@@ -1363,33 +1564,40 @@ let PHONE_ISSUES = [
                 showToast('Carga la cotización del dólar del día para calcular el canje.');
                 return;
             }
-            const brand = document.getElementById('canjeBrandSelect').value;
             const model = document.getElementById('canjeModelSelect').value;
-            const storage = document.getElementById('canjeStorageSelect').value;
-            const condition = document.getElementById('canjeConditionSelect').value;
+            const storageGb = Number(document.getElementById('canjeStorageSelect').value);
             const battery = parseInt(document.getElementById('canjeBatteryInput').value) || 85;
+            const item = IPHONE_TRADE_IN_RATES.find(rate => rate.model === model && rate.storageGb === storageGb);
+            if (!item) {
+                showToast('No existe una cotización para el modelo y almacenamiento seleccionados.');
+                return;
+            }
 
-            const list = CANJE_RATES[brand] || [];
-            const item = list.find(m => m.model === model);
-            
-            let baseValUsd = item ? item.baseUsd : 200;
-
-            if (storage === '256GB') baseValUsd *= 1.08;
-            if (storage === '512GB') baseValUsd *= 1.15;
-
-            if (condition === 'Bueno') baseValUsd *= 0.90;
-            if (condition === 'Detalles') baseValUsd *= 0.80;
-
-            if (battery < 80) baseValUsd *= 0.88;
-            else if (battery < 85) baseValUsd *= 0.94;
-
-            activeTradeInValuationUsd = Math.round(baseValUsd);
+            const repairDiscountUsd = Math.max(0, Number(document.getElementById('canjeRepairDiscountUsd').value) || 0);
+            activeTradeInValuationUsd = Math.max(0, (battery >= 90 ? item.over90Usd : item.under90Usd) - repairDiscountUsd);
             activeTradeInValuation = Math.round(activeTradeInValuationUsd * dailyDollarRate / 1000) * 1000;
 
             document.getElementById('canjeValuationResult').textContent = `USD ${activeTradeInValuationUsd.toLocaleString('en-US')}`;
             document.getElementById('canjeValuationArs').textContent = `$${activeTradeInValuation.toLocaleString('es-AR')} ARS`;
             document.getElementById('canjeValuationRate').textContent = `Cotización del dólar: $${dailyDollarRate.toLocaleString('es-AR')} ARS`;
             document.getElementById('canjeResultCard').classList.remove('hidden');
+        }
+
+        function toggleCanjeDamageFields() {
+            const hasDetails = document.getElementById('canjeConditionSelect').value === 'Detalles';
+            document.getElementById('canjeDamageFields').classList.toggle('hidden', !hasDetails);
+            if (!hasDetails) {
+                document.querySelectorAll('input[name="canjeDamage"]').forEach(checkbox => checkbox.checked = false);
+                document.getElementById('canjeOtherDamageText').value = '';
+                document.getElementById('canjeOtherDamageText').classList.add('hidden');
+            }
+        }
+
+        function toggleCanjeOtherDamage() {
+            const otherInput = document.getElementById('canjeOtherDamageText');
+            const isOtherSelected = document.getElementById('canjeOtherDamage').checked;
+            otherInput.classList.toggle('hidden', !isOtherSelected);
+            if (!isOtherSelected) otherInput.value = '';
         }
 
         function applyCanjeToPOS() {
@@ -1707,6 +1915,16 @@ let PHONE_ISSUES = [
         }
 
         /* FIRESTORE + LOCAL FALLBACK PERSISTENCE */
+        function sanitizeForFirestore(value) {
+            if (Array.isArray(value)) return value.map(sanitizeForFirestore);
+            if (value && typeof value === 'object') {
+                return Object.fromEntries(Object.entries(value)
+                    .filter(([, entry]) => entry !== undefined)
+                    .map(([key, entry]) => [key, sanitizeForFirestore(entry)]));
+            }
+            return value;
+        }
+
         async function saveLocalState() {
             localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
@@ -1720,7 +1938,7 @@ let PHONE_ISSUES = [
             if (!firebase.auth().currentUser) return;
 
             try {
-                await appStateRef.set({
+                await appStateRef.set(sanitizeForFirestore({
                     version: DATA_VERSION,
                     products: PRODUCTS,
                     phones: PHONES,
@@ -1732,7 +1950,7 @@ let PHONE_ISSUES = [
                     cashRegister,
                     dailyDollarRate,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                }));
             } catch (error) {
                 console.error('No se pudo guardar el estado en Firestore:', error);
             }

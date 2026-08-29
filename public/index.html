@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="h-full bg-bonewhite-100 text-slate-800 flex overflow-hidden">
-    <div id="authScreen" class="fixed inset-0 z-[100] bg-slate-900/95 flex items-center justify-center p-4">
+    <div id="authScreen" class="fixed inset-0 z-[100] bg-brand-100/95 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl">
             <div class="text-center mb-6">
                 <div class="mx-auto w-14 h-14 rounded-2xl bg-brand-600 text-white font-extrabold flex items-center justify-center text-xl">BE</div>
@@ -54,7 +54,7 @@
             <!-- Brand Logo Header -->
             <div class="p-5 border-b border-bonewhite-border flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-800 text-white font-extrabold flex items-center justify-center text-lg shadow-md shadow-brand-500/20">
+                    <div class="w-10 h-10 rounded-xl bg-brand-600 text-white font-extrabold flex items-center justify-center text-lg shadow-md shadow-brand-500/20">
                         BE
                     </div>
                     <div>
@@ -66,23 +66,6 @@
 
             <!-- Navigation Links -->
             <nav class="p-3 space-y-1">
-                <div class="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Panel Principal</div>
-                
-                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-chart-pie text-brand-500 w-4 text-center"></i>
-                    <span>Dashboard / Resumen</span>
-                </button>
-
-                <button onclick="switchTab('pos')" id="nav-pos" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <div class="flex items-center gap-3">
-                        <i class="fa-solid fa-cash-register text-emerald-600 w-4 text-center"></i>
-                        <span>Punto de Venta (POS)</span>
-                    </div>
-                    <span class="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">Caja</span>
-                </button>
-
-                <div class="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Gestión de Inventario</div>
-
                 <button onclick="switchTab('inventory-acc')" id="nav-inventory-acc" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <div class="flex items-center gap-3">
                         <i class="fa-solid fa-boxes-stacked text-brand-accent w-4 text-center"></i>
@@ -90,7 +73,9 @@
                     </div>
                     <span id="badgeLowStock" class="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded hidden">0</span>
                 </button>
-
+                <button onclick="switchTab('categories')" id="nav-categories" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-tags text-brand-600 w-4 text-center"></i><span>Categorías</span>
+                </button>
                 <button onclick="switchTab('inventory-phones')" id="nav-inventory-phones" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <div class="flex items-center gap-3">
                         <i class="fa-solid fa-mobile-screen-button text-purple-600 w-4 text-center"></i>
@@ -98,24 +83,27 @@
                     </div>
                     <span id="badgePhonesCount" class="bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.5 rounded">0</span>
                 </button>
-
-                <div class="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Herramientas</div>
-
+                <button onclick="switchTab('clients')" id="nav-clients" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-users text-emerald-600 w-4 text-center"></i><span>Clientes</span>
+                </button>
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-chart-pie text-brand-500 w-4 text-center"></i>
+                    <span>Dashboard / Resumen</span>
+                </button>
                 <button onclick="switchTab('sales-history')" id="nav-sales-history" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-receipt text-slate-500 w-4 text-center"></i>
                     <span>Historial de Ventas</span>
                 </button>
-
                 <button onclick="switchTab('canje-calculator')" id="nav-canje-calculator" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-arrows-rotate text-emerald-500 w-4 text-center"></i>
                     <span>Plan Canje & Usados</span>
                 </button>
-
-                <button onclick="switchTab('categories')" id="nav-categories" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-tags text-brand-600 w-4 text-center"></i><span>Categorías</span>
-                </button>
-                <button onclick="switchTab('clients')" id="nav-clients" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-users text-emerald-600 w-4 text-center"></i><span>Clientes</span>
+                <button onclick="switchTab('pos')" id="nav-pos" class="sidebar-item w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-cash-register text-emerald-600 w-4 text-center"></i>
+                        <span>Punto de Venta (POS)</span>
+                    </div>
+                    <span class="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">Caja</span>
                 </button>
                 <button onclick="openUserModal()" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-users-gear text-brand-600 w-4 text-center"></i><span>Usuarios</span>
@@ -164,10 +152,6 @@
                 <h2 id="pageTitle" class="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2 truncate">
                     <i class="fa-solid fa-chart-pie text-brand-600"></i> Dashboard General
                 </h2>
-                <div class="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 text-xs text-slate-600">
-                    <i class="fa-solid fa-database text-emerald-600"></i>
-                    <span>Base de datos: <strong class="text-slate-900 font-semibold">Firebase Activo</strong></span>
-                </div>
                 <div class="flex items-center gap-2 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 text-xs text-amber-900">
                     <i class="fa-solid fa-dollar-sign text-amber-600"></i>
                     <label for="dailyDollarRate" class="font-semibold whitespace-nowrap">Dólar del día</label>
@@ -303,7 +287,7 @@
                 </div>
 
                 <!-- Quick Actions Shortcuts -->
-                <div class="custom-card p-5 bg-gradient-to-r from-white via-indigo-50/20 to-emerald-50/20">
+                <div class="custom-card p-5 bg-bonewhite-50">
                     <h3 class="font-bold text-slate-900 text-sm mb-3">Acciones Rápidas del Sistema</h3>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <button onclick="switchTab('pos')" class="p-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl flex items-center gap-3 transition group text-left">
@@ -433,6 +417,9 @@
                                 <button id="posPayMixed" onclick="setPOSPaymentMethod('mixed')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
                                     Pago mixto
                                 </button>
+                                <button id="posPayAccount" onclick="setPOSPaymentMethod('account')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
+                                    Cuenta corriente
+                                </button>
                             </div>
                             <div id="mixedPaymentFields" class="hidden grid grid-cols-2 gap-2 mt-2">
                                 <input id="mixedCashAmount" type="number" min="0" oninput="syncMixedPayment('cash')" placeholder="Efectivo / transferencia" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
@@ -477,9 +464,9 @@
                         </div>
 
                         <!-- Complete Sale Button -->
-                        <button onclick="processPOSCheckout()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
+                        <button id="posCheckoutButton" onclick="processPOSCheckout()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
                             <i class="fa-solid fa-check-circle"></i>
-                            <span>Confirmar y Finalizar Venta</span>
+                            <span>Emitir comprobante</span>
                         </button>
                     </div>
                 </div>
@@ -518,7 +505,7 @@
                         <button openProductModal() onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
                             <i class="fa-solid fa-plus"></i> Nuevo Producto
                         </button>
-                        <button onclick="openCategoryModal()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition">
+                        <button onclick="switchTab('categories')" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition">
                             <i class="fa-solid fa-tags"></i> Categorías
                         </button>
                     </div>
@@ -527,7 +514,16 @@
                 <!-- Products Data Table -->
                 <div class="custom-card overflow-hidden">
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-xs border-collapse">
+                        <table class="min-w-[900px] w-full table-fixed text-left text-xs border-collapse">
+                            <colgroup>
+                                <col class="w-[24%]">
+                                <col class="w-[16%]">
+                                <col class="w-[11%]">
+                                <col class="w-[13%]">
+                                <col class="w-[13%]">
+                                <col class="w-[14%]">
+                                <col class="w-[9%]">
+                            </colgroup>
                             <thead>
                                 <tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider">
                                     <th class="p-3.5">Producto</th>
@@ -643,9 +639,8 @@
                         <div class="space-y-3 text-xs">
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">Marca del Usado</label>
-                                <select id="canjeBrandSelect" onchange="updateCanjeModelOptions()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                <select id="canjeBrandSelect" disabled class="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800 disabled:cursor-not-allowed">
                                     <option value="Apple">Apple iPhone</option>
-                                    <option value="Samsung">Samsung Galaxy</option>
                                 </select>
                             </div>
 
@@ -659,26 +654,39 @@
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="block font-bold text-slate-700 mb-1">Almacenamiento</label>
-                                    <select id="canjeStorageSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
-                                        <option value="64GB">64 GB</option>
-                                        <option value="128GB" selected>128 GB</option>
-                                        <option value="256GB">256 GB</option>
-                                        <option value="512GB">512 GB</option>
-                                    </select>
+                                    <select id="canjeStorageSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800"></select>
                                 </div>
                                 <div>
-                                    <label class="block font-bold text-slate-700 mb-1">Salud Batería (%)</label>
+                                    <label class="block font-bold text-slate-700 mb-1">Salud Batería (90% o más)</label>
                                     <input type="number" id="canjeBatteryInput" value="86" min="50" max="100" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold">
                                 </div>
                             </div>
 
                             <div>
                                 <label class="block font-bold text-slate-700 mb-1">Estado Estético</label>
-                                <select id="canjeConditionSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
+                                <select id="canjeConditionSelect" onchange="toggleCanjeDamageFields()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-800">
                                     <option value="Excelente">Excelente (Sin rayas, impecable)</option>
                                     <option value="Bueno">Bueno (Marcas mínimas de uso)</option>
                                     <option value="Detalles">Con detalles estéticos visibles</option>
                                 </select>
+                            </div>
+
+                            <div id="canjeDamageFields" class="hidden space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p class="font-bold text-amber-900">Daños a considerar</p>
+                                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 text-slate-700">
+                                    <label class="flex items-center gap-2"><input type="checkbox" name="canjeDamage" value="Pantalla rota" class="accent-amber-600">Pantalla rota</label>
+                                    <label class="flex items-center gap-2"><input type="checkbox" name="canjeDamage" value="Sin Face ID" class="accent-amber-600">Sin Face ID</label>
+                                    <label class="flex items-center gap-2"><input type="checkbox" name="canjeDamage" value="Tapa trasera rota" class="accent-amber-600">Tapa trasera rota</label>
+                                    <label class="flex items-center gap-2"><input type="checkbox" name="canjeDamage" value="Cambio de módulo" class="accent-amber-600">Cambio de módulo</label>
+                                    <label class="flex items-center gap-2"><input type="checkbox" name="canjeDamage" value="Pin de carga roto" class="accent-amber-600">Pin de carga roto</label>
+                                    <label class="flex items-center gap-2"><input id="canjeOtherDamage" type="checkbox" value="Otro" onchange="toggleCanjeOtherDamage()" class="accent-amber-600">Otro</label>
+                                </div>
+                                <input id="canjeOtherDamageText" type="text" placeholder="Detalle del otro daño" class="hidden w-full bg-white border border-amber-200 rounded-lg p-2 text-xs">
+                            </div>
+
+                            <div>
+                                <label for="canjeRepairDiscountUsd" class="block font-bold text-slate-700 mb-1">Descuento por reparaciones (USD)</label>
+                                <input id="canjeRepairDiscountUsd" type="number" min="0" step="1" value="0" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold font-mono-num">
                             </div>
 
                             <button onclick="calculateTradeInValue()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-sm">
@@ -958,7 +966,7 @@
         <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
             <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
                 <h3 class="font-extrabold text-slate-900 text-base">Comprobante de Venta</h3>
-                <button onclick="closeReceiptModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                <button onclick="closeReceiptModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
@@ -989,7 +997,10 @@
             </div>
 
             <div class="flex gap-2">
-                <button onclick="window.print()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                <button id="cancelPendingSaleBtn" onclick="cancelPendingSale()" class="hidden bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs py-2.5 px-3 rounded-xl transition" title="Cancelar venta">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <button onclick="printReceipt()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl transition">
                     <i class="fa-solid fa-print"></i> Imprimir Comprobante
                 </button>
                 <button id="sendReceiptWhatsappBtn" onclick="sendReceiptViaWhatsApp()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
