@@ -1573,11 +1573,17 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
+            const baseValuationUsd = battery >= 90 ? item.over90Usd : item.under90Usd;
             const repairDiscountUsd = Math.max(0, Number(document.getElementById('canjeRepairDiscountUsd').value) || 0);
-            activeTradeInValuationUsd = Math.max(0, (battery >= 90 ? item.over90Usd : item.under90Usd) - repairDiscountUsd);
+            activeTradeInValuationUsd = Math.max(0, baseValuationUsd - repairDiscountUsd);
             activeTradeInValuation = Math.round(activeTradeInValuationUsd * dailyDollarRate / 1000) * 1000;
 
             document.getElementById('canjeValuationResult').textContent = `USD ${activeTradeInValuationUsd.toLocaleString('en-US')}`;
+            const breakdown = document.getElementById('canjeValuationBreakdown');
+            breakdown.textContent = repairDiscountUsd > 0
+                ? `USD ${baseValuationUsd.toLocaleString('en-US')} - USD ${repairDiscountUsd.toLocaleString('en-US')} por reparaciones`
+                : `Cotización base: USD ${baseValuationUsd.toLocaleString('en-US')}`;
+            breakdown.classList.remove('hidden');
             document.getElementById('canjeValuationArs').textContent = `$${activeTradeInValuation.toLocaleString('es-AR')} ARS`;
             document.getElementById('canjeValuationRate').textContent = `Cotización del dólar: $${dailyDollarRate.toLocaleString('es-AR')} ARS`;
             document.getElementById('canjeResultCard').classList.remove('hidden');
