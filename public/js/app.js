@@ -398,7 +398,6 @@ let IPHONE_TRADE_IN_RATES = [];
             // Calculations
             let accValue = PRODUCTS.reduce((sum, p) => sum + (p.price * p.stock), 0);
             let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + p.price, 0);
-            let totalValue = accValue + phoneValue;
 
             let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
             let newPhones = inStockPhones.filter(p => p.condition === 'Nuevo').length;
@@ -406,7 +405,8 @@ let IPHONE_TRADE_IN_RATES = [];
 
             let lowStockAcc = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.minStock);
 
-            document.getElementById('dashTotalValue').textContent = `$${totalValue.toLocaleString('es-AR')}`;
+            document.getElementById('dashTotalValue').textContent = `$${accValue.toLocaleString('es-AR')}`;
+            document.getElementById('dashPhoneValue').textContent = `$${phoneValue.toLocaleString('es-AR')}`;
             document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
             document.getElementById('dashPhonesSub').textContent = `${newPhones} Nuevos / ${usedPhones} Usados`;
             document.getElementById('dashLowStockCount').textContent = `${lowStockAcc.length} ítems`;
