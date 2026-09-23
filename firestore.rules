@@ -10,6 +10,10 @@ service cloud.firestore {
       return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    function isSeller() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'seller';
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create: if signedIn() && (request.auth.uid == userId || isAdmin());
@@ -19,7 +23,7 @@ service cloud.firestore {
     match /app_state/{document} {
       allow read: if signedIn();
       allow create: if isAdmin();
-      allow update: if isAdmin() || (signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'updatedAt']));
+      allow update: if isAdmin() || (isSeller() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'updatedAt']));
     }
   }
 }

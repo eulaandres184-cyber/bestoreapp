@@ -163,6 +163,19 @@ let IPHONE_TRADE_IN_RATES = [];
             return `${nick.trim().toLowerCase()}@bestore.local`;
         }
 
+        function togglePasswordVisibility(inputId, buttonId) {
+            const input = document.getElementById(inputId);
+            const button = document.getElementById(buttonId);
+            const icon = button.querySelector('i');
+            const isPassword = input.type === 'password';
+
+            input.type = isPassword ? 'text' : 'password';
+            icon.classList.toggle('fa-eye', !isPassword);
+            icon.classList.toggle('fa-eye-slash', isPassword);
+            button.setAttribute('aria-label', isPassword ? 'Ocultar contraseña' : 'Mostrar contraseña');
+            button.setAttribute('title', isPassword ? 'Ocultar contraseña' : 'Mostrar contraseña');
+        }
+
         async function initializeAuthentication() {
             try {
                 const users = await db.collection('users').limit(1).get();
@@ -227,6 +240,7 @@ let IPHONE_TRADE_IN_RATES = [];
             renderClients();
             await loadIphoneTradeInRates();
             updateCanjeModelOptions();
+            applyRoleAccess();
         }
 
         function showAuthMessage(message) {
@@ -240,6 +254,20 @@ let IPHONE_TRADE_IN_RATES = [];
         function requireAdmin() {
             if (!isAdmin()) showToast('Solo un administrador puede realizar esta acción.');
             return isAdmin();
+        }
+
+        function applyRoleAccess() {
+            const adminOnlyElements = [
+                document.getElementById('quickProductButton'),
+                document.getElementById('newProductButton'),
+                document.getElementById('newPhoneButton'),
+                document.getElementById('newCategoryButton'),
+                document.getElementById('intakeUsedPhoneButton')
+            ];
+            adminOnlyElements.filter(Boolean).forEach(element => element.classList.toggle('hidden', !isAdmin()));
+            const dollarInput = document.getElementById('dailyDollarRate');
+            dollarInput.disabled = !isAdmin();
+            dollarInput.classList.toggle('cursor-not-allowed', !isAdmin());
         }
 
         async function logoutUser() {
@@ -441,9 +469,9 @@ let IPHONE_TRADE_IN_RATES = [];
                             <h4 class="text-xs font-bold text-slate-800 truncate">${item.title}</h4>
                             <span class="text-[10px] text-amber-800 font-semibold">Quedan ${item.stock} un. (Mín: ${item.minStock})</span>
                         </div>
-                        <button onclick="quickAddStock('${item.id}', 5)" class="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg shrink-0">
+                        ${isAdmin() ? `<button onclick="quickAddStock('${item.id}', 5)" class="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg shrink-0">
                             +5 Stock
-                        </button>
+                        </button>` : ''}
                     </div>
                 `).join('');
             }
@@ -547,10 +575,10 @@ let IPHONE_TRADE_IN_RATES = [];
                             <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
                                 ${item.stock} un. ${item.status === 'Anulado' ? '<span class="ml-1 text-[9px] uppercase">Anulado</span>' : ''}
                             </span>
-                            <div class="flex flex-col gap-0.5">
+                            ${isAdmin() ? `<div class="flex flex-col gap-0.5">
                                 <button onclick="quickAddStock('${item.id}', 1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">+</button>
                                 <button onclick="quickAddStock('${item.id}', -1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">-</button>
-                            </div>
+                            </div>` : ''}
                         </div>
                     </td>
                     <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${item.cost.toLocaleString('es-AR')}</td>
@@ -558,7 +586,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${item.cashPrice.toLocaleString('es-AR')}</td>
                     <td class="p-3.5 text-center">
                         <div class="flex items-center justify-center gap-2">
-                            <button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
+                            ${isAdmin() ? `<button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
                             <button onclick="toggleProductStatus('${item.id}')" class="p-1.5 rounded-lg ${item.status === 'Anulado' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'} text-xs" title="${item.status === 'Anulado' ? 'Reactivar producto' : 'Anular producto'}">
@@ -566,7 +594,7 @@ let IPHONE_TRADE_IN_RATES = [];
                             </button>
                             <button onclick="deleteProduct('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-xs" title="Eliminar del inventario">
                                 <i class="fa-solid fa-trash"></i>
-                            </button>
+                            </button>` : '<span class="text-[10px] text-slate-400">Solo lectura</span>'}
                         </div>
                     </td>
                 </tr>
@@ -639,11 +667,11 @@ let IPHONE_TRADE_IN_RATES = [];
                                     <i class="fa-solid fa-cart-plus"></i> Vender
                                 </button>
                             ` : ''}
-                            ${item.status === 'En Stock' ? `<button onclick="markPhoneSold('${item.id}')" class="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs" title="Marcar vendido"><i class="fa-solid fa-check"></i></button>` : ''}
-                            <button onclick="editPhone('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
+                            ${isAdmin() && item.status === 'En Stock' ? `<button onclick="markPhoneSold('${item.id}')" class="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs" title="Marcar vendido"><i class="fa-solid fa-check"></i></button>` : ''}
+                            ${isAdmin() ? `<button onclick="editPhone('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
-                            <button onclick="deletePhone('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+                            <button onclick="deletePhone('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar"><i class="fa-solid fa-trash"></i></button>` : '<span class="text-[10px] text-slate-400">Solo lectura</span>'}
                         </div>
                     </td>
                 </tr>
@@ -1591,7 +1619,7 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('categoryList').innerHTML = CATEGORIES.map(category => `
                 <div class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
                     <span class="font-semibold">${category.name}</span>
-                    <button onclick="deleteCategory('${category.id}')" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+                    ${isAdmin() ? `<button onclick="deleteCategory('${category.id}')" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fa-solid fa-trash"></i></button>` : ''}
                 </div>
             `).join('');
         }
@@ -1677,6 +1705,7 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function intakeUsedPhoneFromCanje() {
+            if (!requireAdmin()) return;
             if (activeTradeInValuation <= 0) return;
             const brand = document.getElementById('canjeBrandSelect').value;
             const model = document.getElementById('canjeModelSelect').value;
@@ -2028,19 +2057,26 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!firebase.auth().currentUser) return;
 
             try {
-                await appStateRef.set(sanitizeForFirestore({
-                    version: DATA_VERSION,
-                    products: PRODUCTS,
-                    phones: PHONES,
-                    sales: SALES,
-                    clients: CLIENTS,
-                    categories: CATEGORIES,
-                    caseSubcategories: CASE_SUBCATEGORIES,
-                    phoneIssues: PHONE_ISSUES,
-                    cashRegister,
-                    dailyDollarRate,
+                const state = isAdmin()
+                    ? {
+                        version: DATA_VERSION,
+                        products: PRODUCTS,
+                        phones: PHONES,
+                        sales: SALES,
+                        clients: CLIENTS,
+                        categories: CATEGORIES,
+                        caseSubcategories: CASE_SUBCATEGORIES,
+                        phoneIssues: PHONE_ISSUES,
+                        cashRegister,
+                        dailyDollarRate
+                    }
+                    : { sales: SALES };
+                const payload = sanitizeForFirestore({
+                    ...state,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                }));
+                });
+                if (isAdmin()) await appStateRef.set(payload, { merge: true });
+                else await appStateRef.update(payload);
             } catch (error) {
                 console.error('No se pudo guardar el estado en Firestore:', error);
             }

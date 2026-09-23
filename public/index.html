@@ -35,7 +35,12 @@
             </div>
             <form id="loginForm" onsubmit="loginUser(event)" class="space-y-3">
                 <input id="loginNick" required autocomplete="username" placeholder="Nick de usuario" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm">
-                <input id="loginPassword" required minlength="6" type="password" autocomplete="current-password" placeholder="Clave" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm">
+                <div class="relative">
+                    <input id="loginPassword" required minlength="6" type="password" autocomplete="current-password" placeholder="Clave" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-11 text-sm">
+                    <button type="button" id="toggleLoginPassword" onclick="togglePasswordVisibility('loginPassword', 'toggleLoginPassword')" class="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-500 hover:text-slate-800" aria-label="Mostrar contraseña" title="Mostrar contraseña">
+                        <i class="fa-solid fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <button class="w-full bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 rounded-xl">Ingresar</button>
             </form>
             <form id="setupAdminForm" onsubmit="setupFirstAdmin(event)" class="hidden space-y-3">
@@ -173,7 +178,7 @@
                 </button>
 
                 <!-- Quick Product Modal Button -->
-                <button onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-3 py-2 sm:px-3.5 rounded-xl flex items-center gap-2 shadow-sm transition" title="Cargar producto">
+                <button id="quickProductButton" onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-3 py-2 sm:px-3.5 rounded-xl flex items-center gap-2 shadow-sm transition" title="Cargar producto">
                     <i class="fa-solid fa-box-archive"></i>
                     <span class="hidden sm:inline">Cargar Producto</span>
                 </button>
@@ -525,7 +530,7 @@
                     </div>
 
                     <div class="inventory-actions flex items-center gap-2 w-full xl:w-auto">
-                        <button openProductModal() onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
+                        <button id="newProductButton" openProductModal() onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
                             <i class="fa-solid fa-plus"></i> Nuevo Producto
                         </button>
                         <button onclick="switchTab('categories')" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition">
@@ -596,7 +601,7 @@
                     </div>
 
                     <div class="inventory-actions flex items-center gap-2 w-full xl:w-auto">
-                        <button onclick="openPhoneModal()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
+                        <button id="newPhoneButton" onclick="openPhoneModal()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-sm">
                             <i class="fa-solid fa-mobile-screen"></i> Ingresar Celular
                         </button>
                     </div>
@@ -738,7 +743,7 @@
                                     <button onclick="applyCanjeToPOS()" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
                                         Usar como Descuento en Caja
                                     </button>
-                                    <button onclick="intakeUsedPhoneFromCanje()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                                    <button id="intakeUsedPhoneButton" onclick="intakeUsedPhoneFromCanje()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
                                         + Cargar a Stock Usados
                                     </button>
                                 </div>
@@ -758,7 +763,7 @@
             <section id="view-categories" class="hidden space-y-4">
                 <div class="custom-card p-5 flex items-center justify-between">
                     <h3 class="font-extrabold text-slate-900">Categorías</h3>
-                    <div class="flex gap-2"><select id="categorySort" onchange="renderCategoriesPage()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs"><option value="name">Ordenar por nombre</option><option value="count">Ordenar por cantidad</option></select><button onclick="openCategoryModal()" class="bg-brand-600 text-white font-bold px-3 py-2 rounded-xl text-xs">Nueva categoría</button></div>
+                    <div class="flex gap-2"><select id="categorySort" onchange="renderCategoriesPage()" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs"><option value="name">Ordenar por nombre</option><option value="count">Ordenar por cantidad</option></select><button id="newCategoryButton" onclick="openCategoryModal()" class="bg-brand-600 text-white font-bold px-3 py-2 rounded-xl text-xs">Nueva categoría</button></div>
                 </div>
                 <div id="categoriesPageList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
                 <div id="categoryProductsPanel" class="hidden custom-card p-5 space-y-4">
