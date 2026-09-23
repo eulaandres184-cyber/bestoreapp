@@ -90,6 +90,35 @@ body {
     color: #003223;
 }
 
+@media (min-width: 768px) and (max-width: 1279px) {
+    main { padding-bottom: 6rem; }
+    .mobile-nav { justify-content: center; }
+    .mobile-nav-item { flex: 1 1 0; min-width: 4rem; }
+    .inventory-toolbar { align-items: stretch; }
+    .inventory-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+    .inventory-filters > :first-child { grid-column: 1 / -1; max-width: none; }
+    .inventory-filters select, .inventory-actions button { width: 100%; }
+    .inventory-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    #accessoriesTable { min-width: 0; }
+    #accessoriesTable colgroup, #accessoriesTable thead { display: none; }
+    #accessoriesTable, #accessoriesTable tbody { display: block; width: 100%; }
+    #accessoriesTable tbody { padding: 0.5rem; }
+    #accessoriesTable tbody tr { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.25rem 0.75rem; margin-bottom: 0.5rem; padding: 0.75rem; border: 1px solid #edddcc; border-radius: 0.75rem; background: #fffdfa; }
+    #accessoriesTable tbody tr:last-child { margin-bottom: 0; }
+    #accessoriesTable tbody td { padding: 0.25rem 0; border: 0; }
+    #accessoriesTable tbody td:nth-child(1) { grid-column: 1 / 3; }
+    #accessoriesTable tbody td:nth-child(2), #accessoriesTable tbody td:nth-child(3), #accessoriesTable tbody td:nth-child(4), #accessoriesTable tbody td:nth-child(5), #accessoriesTable tbody td:nth-child(6), #accessoriesTable tbody td:nth-child(7) { display: flex; flex-direction: column; gap: 0.15rem; }
+    #accessoriesTable tbody td:nth-child(2)::before, #accessoriesTable tbody td:nth-child(3)::before, #accessoriesTable tbody td:nth-child(4)::before, #accessoriesTable tbody td:nth-child(5)::before, #accessoriesTable tbody td:nth-child(6)::before, #accessoriesTable tbody td:nth-child(7)::before { color: #647262; font-size: 0.625rem; font-weight: 700; text-transform: uppercase; }
+    #accessoriesTable tbody td:nth-child(2)::before { content: 'Marca'; }
+    #accessoriesTable tbody td:nth-child(3)::before { content: 'Categoría'; }
+    #accessoriesTable tbody td:nth-child(4)::before { content: 'Stock'; }
+    #accessoriesTable tbody td:nth-child(5)::before { content: 'Costo'; }
+    #accessoriesTable tbody td:nth-child(6)::before { content: 'Lista'; }
+    #accessoriesTable tbody td:nth-child(7)::before { content: 'Efectivo'; }
+    #accessoriesTable tbody td:nth-child(8) { grid-column: 3; grid-row: 1; align-self: start; }
+}
+
 @media (max-width: 767px) {
     body {
         overflow: hidden;
@@ -182,6 +211,67 @@ body {
         min-width: 40rem;
     }
 
+    #accessoriesTable {
+        min-width: 0;
+    }
+
+    #accessoriesTable colgroup,
+    #accessoriesTable thead { display: none; }
+
+    #accessoriesTable,
+    #accessoriesTable tbody { display: block; width: 100%; }
+
+    #accessoriesTable tbody { padding: 0.5rem; }
+
+    #accessoriesTable tbody tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0.25rem 0.5rem;
+        margin-bottom: 0.5rem;
+        padding: 0.75rem;
+        border: 1px solid #edddcc;
+        border-radius: 0.75rem;
+        background: #fffdfa;
+    }
+
+    #accessoriesTable tbody tr:last-child { margin-bottom: 0; }
+    #accessoriesTable tbody td { padding: 0.25rem 0; border: 0; }
+    #accessoriesTable tbody td:nth-child(2),
+    #accessoriesTable tbody td:nth-child(3),
+    #accessoriesTable tbody td:nth-child(4),
+    #accessoriesTable tbody td:nth-child(5),
+    #accessoriesTable tbody td:nth-child(6),
+    #accessoriesTable tbody td:nth-child(7) { display: flex; flex-direction: column; gap: 0.15rem; }
+    #accessoriesTable tbody td:nth-child(2)::before,
+    #accessoriesTable tbody td:nth-child(3)::before,
+    #accessoriesTable tbody td:nth-child(4)::before,
+    #accessoriesTable tbody td:nth-child(5)::before,
+    #accessoriesTable tbody td:nth-child(6)::before,
+    #accessoriesTable tbody td:nth-child(7)::before { color: #647262; font-size: 0.625rem; font-weight: 700; text-transform: uppercase; }
+    #accessoriesTable tbody td:nth-child(2)::before { content: 'Marca'; }
+    #accessoriesTable tbody td:nth-child(3)::before { content: 'Categoría'; }
+    #accessoriesTable tbody td:nth-child(4)::before { content: 'Stock'; }
+    #accessoriesTable tbody td:nth-child(5)::before { content: 'Costo'; }
+    #accessoriesTable tbody td:nth-child(6)::before { content: 'Lista'; }
+    #accessoriesTable tbody td:nth-child(7)::before { content: 'Efectivo'; }
+
+    #accessoriesTable tbody td:nth-child(1) {
+        min-width: 0;
+    }
+
+    #accessoriesTable tbody td:nth-child(8) > div {
+        gap: 0.25rem;
+    }
+
+    #accessoriesTable tbody td:nth-child(1) {
+        grid-column: 1;
+    }
+
+    #accessoriesTable tbody td:nth-child(8) {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
     .custom-card:has(table) {
         overflow-x: auto;
     }
@@ -240,6 +330,25 @@ body {
     #view-categories > .custom-card:first-child button {
         flex: 1;
     }
+
+    #accessoriesTable { min-width: 0; }
+    #accessoriesTable colgroup, #accessoriesTable thead { display: none; }
+    #accessoriesTable, #accessoriesTable tbody { display: block; width: 100%; }
+    #accessoriesTable tbody { padding: 0.5rem; }
+    #accessoriesTable tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.25rem 0.5rem; margin-bottom: 0.5rem; padding: 0.75rem; border: 1px solid #edddcc; border-radius: 0.75rem; background: #fffdfa; }
+    #accessoriesTable tbody tr:last-child { margin-bottom: 0; }
+    #accessoriesTable tbody td { min-width: 0; padding: 0.25rem 0; border: 0; }
+    #accessoriesTable tbody td:nth-child(1) { grid-column: 1; }
+    #accessoriesTable tbody td:nth-child(2), #accessoriesTable tbody td:nth-child(3), #accessoriesTable tbody td:nth-child(4), #accessoriesTable tbody td:nth-child(5), #accessoriesTable tbody td:nth-child(6), #accessoriesTable tbody td:nth-child(7) { display: flex; flex-direction: column; gap: 0.15rem; }
+    #accessoriesTable tbody td:nth-child(2)::before, #accessoriesTable tbody td:nth-child(3)::before, #accessoriesTable tbody td:nth-child(4)::before, #accessoriesTable tbody td:nth-child(5)::before, #accessoriesTable tbody td:nth-child(6)::before, #accessoriesTable tbody td:nth-child(7)::before { color: #647262; font-size: 0.625rem; font-weight: 700; text-transform: uppercase; }
+    #accessoriesTable tbody td:nth-child(2)::before { content: 'Marca'; }
+    #accessoriesTable tbody td:nth-child(3)::before { content: 'Categoría'; }
+    #accessoriesTable tbody td:nth-child(4)::before { content: 'Stock'; }
+    #accessoriesTable tbody td:nth-child(5)::before { content: 'Costo'; }
+    #accessoriesTable tbody td:nth-child(6)::before { content: 'Lista'; }
+    #accessoriesTable tbody td:nth-child(7)::before { content: 'Efectivo'; }
+    #accessoriesTable tbody td:nth-child(8) { grid-column: 2; grid-row: 1; }
+    #accTableBody .accessory-product-cell, #accTableBody .accessory-stock-cell { min-width: 0; }
 
     #toastContainer {
         right: 0.75rem;
