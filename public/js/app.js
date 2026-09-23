@@ -564,6 +564,9 @@ let IPHONE_TRADE_IN_RATES = [];
                             <button onclick="toggleProductStatus('${item.id}')" class="p-1.5 rounded-lg ${item.status === 'Anulado' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'} text-xs" title="${item.status === 'Anulado' ? 'Reactivar producto' : 'Anular producto'}">
                                 <i class="fa-solid ${item.status === 'Anulado' ? 'fa-rotate-left' : 'fa-ban'}"></i>
                             </button>
+                            <button onclick="deleteProduct('${item.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-xs" title="Eliminar del inventario">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
                         </div>
                     </td>
                 </tr>
@@ -1830,6 +1833,22 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderAccTable();
                 showToast(`Stock actualizado para ${p.title}`);
             }
+        }
+
+        async function deleteProduct(id) {
+            if (!requireAdmin()) return;
+            const product = PRODUCTS.find(item => item.id === id);
+            if (!product) return;
+            if (!confirm(`Se eliminará "${product.title}" del inventario. Las ventas registradas no se modificarán. ¿Continuar?`)) return;
+
+            PRODUCTS = PRODUCTS.filter(item => item.id !== id);
+            await saveLocalState();
+            renderDashboard();
+            renderAccTable();
+            renderPOSCategories();
+            renderPOSItemsGrid();
+            renderCategoriesPage();
+            showToast(`${product.title} fue eliminado del inventario.`);
         }
 
         /* MODAL CRUD OPERATIONS FOR PHONES */
