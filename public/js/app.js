@@ -90,6 +90,7 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const imageStorage = firebase.storage();
 const appStateRef = db.collection('app_state').doc('main');
 let currentUserProfile = null;
 let CATEGORIES = [
@@ -1731,6 +1732,7 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             hideProductFeedback();
             document.getElementById('productForm').reset();
+            previewImageUrl('', 'prodImagePreview');
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
             renderCaseSubcategoryOptions();
@@ -1741,6 +1743,64 @@ let IPHONE_TRADE_IN_RATES = [];
         function closeProductModal() {
             hideProductFeedback();
             document.getElementById('productModal').classList.add('hidden');
+        }
+
+        function openImageFilePicker(fileInputId) {
+            const fileInput = document.getElementById(fileInputId);
+            fileInput.value = '';
+            if (typeof fileInput.showPicker === 'function') {
+                try {
+                    fileInput.showPicker();
+                    return;
+                } catch (error) {
+                    console.warn('No se pudo abrir el selector nativo con showPicker:', error);
+                }
+            }
+            fileInput.click();
+        }
+
+        function previewSelectedImage(input, previewId) {
+            const preview = document.getElementById(previewId);
+            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+            const file = input.files?.[0];
+            if (!file) return previewImageUrl('', previewId);
+            const urlInputId = previewId === 'prodImagePreview' ? 'prodImage' : 'phoneImage';
+            document.getElementById(urlInputId).value = '';
+            const objectUrl = URL.createObjectURL(file);
+            preview.dataset.objectUrl = objectUrl;
+            preview.src = objectUrl;
+            preview.classList.remove('hidden');
+        }
+
+        function previewImageUrl(url, previewId) {
+            const preview = document.getElementById(previewId);
+            if (url) {
+                const fileInputId = previewId === 'prodImagePreview' ? 'prodImageFile' : 'phoneImageFile';
+                document.getElementById(fileInputId).value = '';
+            }
+            if (preview.dataset.objectUrl) {
+                URL.revokeObjectURL(preview.dataset.objectUrl);
+                delete preview.dataset.objectUrl;
+            }
+            if (url) {
+                preview.src = url;
+                preview.classList.remove('hidden');
+            } else {
+                preview.removeAttribute('src');
+                preview.classList.add('hidden');
+            }
+        }
+
+        async function uploadProductImage(file, itemId) {
+            if (!file) return null;
+            if (!file.type.startsWith('image/')) throw new Error('Selecciona un archivo de imagen válido.');
+            if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
+            const userId = firebase.auth().currentUser?.uid;
+            if (!userId) throw new Error('Inicia sesión nuevamente para subir imágenes.');
+            const extension = file.name.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
+            const imageRef = imageStorage.ref(`product-images/${userId}/${itemId}-${Date.now()}.${extension}`);
+            const snapshot = await imageRef.put(file, { contentType: file.type });
+            return snapshot.ref.getDownloadURL();
         }
 
         function autoCalcCashPrice() {
@@ -1762,7 +1822,8 @@ let IPHONE_TRADE_IN_RATES = [];
             const cost = parseFloat(document.getElementById('prodCost').value) || 0;
             const price = parseFloat(document.getElementById('prodPrice').value) || 0;
             const cashPrice = price;
-            const image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
+            let image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
+            const imageFile = document.getElementById('prodImageFile').files[0];
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
@@ -1772,6 +1833,8 @@ let IPHONE_TRADE_IN_RATES = [];
             const isUpdate = existingIndex > -1;
 
             try {
+                if (imageFile) image = await uploadProductImage(imageFile, id);
+                productObj.image = image;
                 if (isUpdate) {
                     PRODUCTS[existingIndex] = productObj;
                 } else {
@@ -1784,12 +1847,13 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderCaseSubcategoryOptions();
                 updateAccessorySubcategoryFilter();
                 document.getElementById('productForm').reset();
+                previewImageUrl('', 'prodImagePreview');
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
             } catch (error) {
                 console.error('No se pudo guardar el producto:', error);
-                showProductFeedback('No se pudo guardar el producto. Revisa los datos e intenta nuevamente.', false);
+                showProductFeedback(error.message || 'No se pudo guardar el producto. Revisa los datos e intenta nuevamente.', false);
             }
         }
 
@@ -1828,7 +1892,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('prodCost').value = p.cost;
             document.getElementById('prodPrice').value = p.price;
             document.getElementById('prodCashPrice').value = p.cashPrice;
+            document.getElementById('prodImageFile').value = '';
             document.getElementById('prodImage').value = p.image;
+            previewImageUrl(p.image, 'prodImagePreview');
             document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';
@@ -1884,6 +1950,7 @@ let IPHONE_TRADE_IN_RATES = [];
         function openPhoneModal() {
             if (!requireAdmin()) return;
             document.getElementById('phoneForm').reset();
+            previewImageUrl('', 'phoneImagePreview');
             document.getElementById('phoneId').value = '';
             document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
             renderPhoneIssueOptions();
@@ -1962,7 +2029,7 @@ let IPHONE_TRADE_IN_RATES = [];
             input.value = '';
         }
 
-        function savePhoneUnit(e) {
+        async function savePhoneUnit(e) {
             e.preventDefault();
             if (!requireAdmin()) return;
             const id = document.getElementById('phoneId').value || `PH-${Date.now().toString().slice(-4)}`;
@@ -1982,7 +2049,8 @@ let IPHONE_TRADE_IN_RATES = [];
             const priceUsd = currency === 'USD' ? enteredPrice : null;
             const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
-            const image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
+            let image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
+            const imageFile = document.getElementById('phoneImageFile').files[0];
             const issues = condition.includes('Usado') ? [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(input => input.value) : [];
 
             if (!validatePhoneImei()) {
@@ -1993,6 +2061,13 @@ let IPHONE_TRADE_IN_RATES = [];
             const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image, issues };
             const existingIndex = PHONES.findIndex(p => p.id === id);
 
+            try {
+                if (imageFile) phoneObj.image = await uploadProductImage(imageFile, id);
+            } catch (error) {
+                showToast(error.message || 'No se pudo subir la imagen.');
+                return;
+            }
+
             if (existingIndex > -1) {
                 PHONES[existingIndex] = phoneObj;
                 showToast("Ficha de smartphone actualizada.");
@@ -2001,7 +2076,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast("Smartphone registrado en el stock.");
             }
 
-            saveLocalState();
+            await saveLocalState();
             renderDashboard();
             renderPhonesTable();
             closePhoneModal();
@@ -2027,7 +2102,9 @@ let IPHONE_TRADE_IN_RATES = [];
             updatePhonePriceLabel();
             updatePhoneConvertedPrice();
             document.getElementById('phoneStatus').value = ph.status;
+            document.getElementById('phoneImageFile').value = '';
             document.getElementById('phoneImage').value = ph.image;
+            previewImageUrl(ph.image, 'phoneImagePreview');
 
             document.getElementById('phoneModalTitle').textContent = 'Editar Unidad Smartphone';
             document.getElementById('phoneModal').classList.remove('hidden');
