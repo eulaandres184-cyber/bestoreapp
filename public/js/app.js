@@ -1803,6 +1803,25 @@ let IPHONE_TRADE_IN_RATES = [];
             return snapshot.ref.getDownloadURL();
         }
 
+        function getProductSaveErrorMessage(error) {
+            if (['storage/bucket-not-found', 'storage/no-default-bucket'].includes(error.code)) {
+                return 'Firebase Storage no está inicializado. Activa Storage en Firebase Console para cargar archivos; puedes pegar una URL mientras tanto.';
+            }
+            if (error.code?.startsWith('storage/') || /Firebase Storage has not been set up/i.test(error.message || '')) {
+                return `No se pudo subir la imagen a Firebase Storage (${error.code || 'error'}). Verifica que Storage esté inicializado y que sus reglas permitan la carga.`;
+            }
+            if (['resource-exhausted', 'firestore/resource-exhausted'].includes(error.code)) {
+                return 'Firestore rechazó los datos por superar el límite de tamaño del documento. Guarda las imágenes en Storage y conserva solo sus URL.';
+            }
+            if (['permission-denied', 'firestore/permission-denied'].includes(error.code)) {
+                return 'Firebase rechazó el guardado por permisos. Verifica que tu usuario tenga rol de administrador.';
+            }
+            if (error.code === 'auth/no-current-user') {
+                return 'La sesión de Firebase venció. Vuelve a iniciar sesión para sincronizar los cambios.';
+            }
+            return error.message || 'No se pudo guardar el producto. Revisa los datos e intenta nuevamente.';
+        }
+
         function autoCalcCashPrice() {
             const listPrice = parseFloat(document.getElementById('prodPrice').value) || 0;
             document.getElementById('prodCashPrice').value = listPrice;
@@ -1841,11 +1860,15 @@ let IPHONE_TRADE_IN_RATES = [];
                     PRODUCTS.push(productObj);
                 }
 
-                await saveLocalState();
+                const synced = await saveLocalState({ throwOnRemoteError: true });
                 renderDashboard();
                 renderAccTable();
                 renderCaseSubcategoryOptions();
                 updateAccessorySubcategoryFilter();
+                if (!synced) {
+                    showProductFeedback('El cambio quedó guardado en este dispositivo, pero Firebase no lo confirmó. Revisa la conexión y vuelve a intentar.', false);
+                    return;
+                }
                 document.getElementById('productForm').reset();
                 previewImageUrl('', 'prodImagePreview');
                 document.getElementById('prodId').value = '';
@@ -1853,7 +1876,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
             } catch (error) {
                 console.error('No se pudo guardar el producto:', error);
-                showProductFeedback(error.message || 'No se pudo guardar el producto. Revisa los datos e intenta nuevamente.', false);
+                showProductFeedback(getProductSaveErrorMessage(error), false);
             }
         }
 
@@ -2068,17 +2091,22 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            if (existingIndex > -1) {
+            const isUpdate = existingIndex > -1;
+            if (isUpdate) {
                 PHONES[existingIndex] = phoneObj;
-                showToast("Ficha de smartphone actualizada.");
             } else {
                 PHONES.push(phoneObj);
-                showToast("Smartphone registrado en el stock.");
             }
 
-            await saveLocalState();
+            try {
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                showToast(getProductSaveErrorMessage(error));
+                return;
+            }
             renderDashboard();
             renderPhonesTable();
+            showToast(isUpdate ? 'Ficha de smartphone actualizada.' : 'Smartphone registrado en el stock.');
             closePhoneModal();
         }
 
@@ -2121,7 +2149,7 @@ let IPHONE_TRADE_IN_RATES = [];
             return value;
         }
 
-        async function saveLocalState() {
+        async function saveLocalState({ throwOnRemoteError = false } = {}) {
             localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
@@ -2131,7 +2159,14 @@ let IPHONE_TRADE_IN_RATES = [];
             localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
             localStorage.setItem('bestore_internal_phone_issues', JSON.stringify(PHONE_ISSUES));
 
-            if (!firebase.auth().currentUser) return;
+            if (!firebase.auth().currentUser) {
+                if (throwOnRemoteError) {
+                    const error = new Error('La sesión de Firebase venció.');
+                    error.code = 'auth/no-current-user';
+                    throw error;
+                }
+                return true;
+            }
 
             try {
                 const state = isAdmin()
@@ -2156,7 +2191,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 else await appStateRef.update(payload);
             } catch (error) {
                 console.error('No se pudo guardar el estado en Firestore:', error);
+                if (throwOnRemoteError) throw error;
+                return false;
             }
+            return true;
         }
 
         async function loadLocalState() {
