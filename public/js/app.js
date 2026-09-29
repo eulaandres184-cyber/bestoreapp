@@ -92,8 +92,8 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const imageStorage = firebase.storage();
 // Evita que una subida falle recién a los 2 minutos por reintentos automáticos cuando Storage no está disponible.
-imageStorage.maxUploadRetryTime(8000);
-imageStorage.maxOperationRetryTime(8000);
+imageStorage.setMaxUploadRetryTime(8000);
+imageStorage.setMaxOperationRetryTime(8000);
 let storageUploadUnavailable = false;
 const appStateRef = db.collection('app_state').doc('main');
 let currentUserProfile = null;
