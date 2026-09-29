@@ -91,6 +91,10 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const imageStorage = firebase.storage();
+// Evita que una subida falle recién a los 2 minutos por reintentos automáticos cuando Storage no está disponible.
+imageStorage.maxUploadRetryTime(8000);
+imageStorage.maxOperationRetryTime(8000);
+let storageUploadUnavailable = false;
 const appStateRef = db.collection('app_state').doc('main');
 let currentUserProfile = null;
 let CATEGORIES = [
@@ -1797,10 +1801,20 @@ let IPHONE_TRADE_IN_RATES = [];
             if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
             const userId = firebase.auth().currentUser?.uid;
             if (!userId) throw new Error('Inicia sesión nuevamente para subir imágenes.');
+            if (storageUploadUnavailable) {
+                const error = new Error('Firebase Storage no está disponible en este proyecto.');
+                error.code = 'storage/bucket-not-found';
+                throw error;
+            }
             const extension = file.name.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
             const imageRef = imageStorage.ref(`product-images/${userId}/${itemId}-${Date.now()}.${extension}`);
-            const snapshot = await imageRef.put(file, { contentType: file.type });
-            return snapshot.ref.getDownloadURL();
+            try {
+                const snapshot = await imageRef.put(file, { contentType: file.type });
+                return await snapshot.ref.getDownloadURL();
+            } catch (error) {
+                if (error.code?.startsWith('storage/')) storageUploadUnavailable = true;
+                throw error;
+            }
         }
 
         function getProductSaveErrorMessage(error) {
