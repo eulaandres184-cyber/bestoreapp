@@ -159,7 +159,16 @@ let IPHONE_TRADE_IN_RATES = [];
         window.onload = async function() {
             await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
             firebase.auth().onAuthStateChanged(async user => {
-                if (user && !currentUserProfile) await finishLogin(user);
+                if (!user || currentUserProfile) return;
+                try {
+                    await finishLogin(user);
+                } catch (error) {
+                    console.error('No se pudo restaurar la sesión:', error);
+                    await firebase.auth().signOut();
+                    currentUserProfile = null;
+                    document.getElementById('authScreen').classList.remove('hidden');
+                    showAuthMessage(error.message || 'No se pudo restaurar tu sesión. Ingresá nuevamente.');
+                }
             });
             await initializeAuthentication();
         };
@@ -213,13 +222,17 @@ let IPHONE_TRADE_IN_RATES = [];
                 const credential = await firebase.auth().signInWithEmailAndPassword(nickEmail(nick), document.getElementById('loginPassword').value);
                 await finishLogin(credential.user);
             } catch (error) {
-                showAuthMessage('Nick o clave incorrectos.');
+                const isCredentialError = typeof error.code === 'string' && error.code.startsWith('auth/');
+                showAuthMessage(isCredentialError ? 'Nick o clave incorrectos.' : (error.message || 'No se pudo iniciar sesión. Intenta nuevamente.'));
             }
         }
 
         async function finishLogin(user) {
             const profile = await db.collection('users').doc(user.uid).get();
-            if (!profile.exists) throw new Error('Usuario sin perfil asignado.');
+            if (!profile.exists) {
+                await firebase.auth().signOut();
+                throw new Error('Usuario sin perfil asignado. Consulte a un administrador.');
+            }
             currentUserProfile = profile.data();
             if (currentUserProfile.active === false) {
                 await firebase.auth().signOut();
