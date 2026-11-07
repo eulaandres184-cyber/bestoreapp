@@ -10,7 +10,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="js/app.js"></script>
 
     <!-- Google Fonts -->
@@ -793,6 +792,7 @@
 
             <form id="productForm" onsubmit="saveProduct(event)" class="space-y-3 text-xs">
                 <input type="hidden" id="prodId">
+                <input type="hidden" id="prodExistingImage">
                 
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">Nombre / Título del Producto *</label>
@@ -855,18 +855,6 @@
                 </div>
 
                 <div>
-                    <label class="block font-bold text-slate-700 mb-1">Imagen del producto (Opcional)</label>
-                    <input type="file" id="prodImageFile" accept="image/*" onchange="previewSelectedImage(this, 'prodImagePreview')" class="hidden">
-                    <div class="image-url-field">
-                        <input type="url" id="prodImage" placeholder="URL de imagen o usar + para elegir un archivo" onchange="previewImageUrl(this.value, 'prodImagePreview')" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-12 text-xs">
-                        <button type="button" onclick="openImageFilePicker('prodImageFile')" class="image-picker-button" title="Elegir imagen del dispositivo" aria-label="Elegir imagen del dispositivo">
-                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                    <img id="prodImagePreview" class="product-image-preview hidden" alt="Vista previa de la imagen del producto">
-                </div>
-
-                <div>
                     <label class="block font-bold text-slate-700 mb-1">Código de barras (Opcional)</label>
                     <input type="text" id="prodBarcode" placeholder="EAN / UPC" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono-num">
                 </div>
@@ -899,6 +887,7 @@
 
             <form id="phoneForm" onsubmit="savePhoneUnit(event)" class="space-y-3 text-xs">
                 <input type="hidden" id="phoneId">
+                <input type="hidden" id="phoneExistingImage">
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
@@ -989,18 +978,6 @@
                             </select>
                         </div>
                     </div>
-
-                <div>
-                    <label class="block font-bold text-slate-700 mb-1">Imagen del smartphone (Opcional)</label>
-                    <input type="file" id="phoneImageFile" accept="image/*" onchange="previewSelectedImage(this, 'phoneImagePreview')" class="hidden">
-                    <div class="image-url-field">
-                        <input type="url" id="phoneImage" placeholder="URL de imagen o usar + para elegir un archivo" onchange="previewImageUrl(this.value, 'phoneImagePreview')" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-12 text-xs">
-                        <button type="button" onclick="openImageFilePicker('phoneImageFile')" class="image-picker-button" title="Elegir imagen del dispositivo" aria-label="Elegir imagen del dispositivo">
-                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                    <img id="phoneImagePreview" class="product-image-preview hidden" alt="Vista previa de la imagen del smartphone">
-                </div>
 
                 <div class="pt-3 flex justify-end gap-2">
                     <button type="button" onclick="closePhoneModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancelar</button>

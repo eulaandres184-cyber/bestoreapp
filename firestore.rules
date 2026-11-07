@@ -25,5 +25,10 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin() || (isSeller() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'updatedAt']));
     }
+
+    match /product_images/{imageId} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && request.resource.data.dataUrl.size() < 900000;
+    }
   }
 }
