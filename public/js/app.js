@@ -91,10 +91,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const appStateRef = db.collection('app_state').doc('main');
-// Las imágenes se guardan comprimidas en su propio documento de Firestore, no en Firebase Storage (no está aprovisionado en este proyecto).
-const productImagesRef = db.collection('product_images');
-const FIRESTORE_IMAGE_PREFIX = 'firestore-image:';
-const productImageCache = new Map();
 let currentUserProfile = null;
 let CATEGORIES = [
     { id: 'fundas', name: 'Fundas & Covers' },
@@ -572,11 +568,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            body.innerHTML = filtered.map(item => { const img = productImageMarkup(item.image); return `
+            body.innerHTML = filtered.map(item => `
                 <tr class="hover:bg-slate-50 transition ${item.status === 'Anulado' ? 'opacity-60 bg-slate-100' : ''}">
                     <td class="p-3.5">
                         <div class="accessory-product-cell flex items-center gap-3">
-                            <img src="${img.src}"${img.dataAttr} class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id}</span>
@@ -616,9 +611,8 @@ let IPHONE_TRADE_IN_RATES = [];
                         </div>
                     </td>
                 </tr>
-            `; }).join('');
+            `).join('');
             renderAccTableTotals(filtered);
-            hydrateProductImages();
         }
 
         function renderAccTableTotals(products) {
@@ -651,11 +645,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            body.innerHTML = filtered.map(item => { const img = productImageMarkup(item.image); return `
+            body.innerHTML = filtered.map(item => `
                 <tr class="hover:bg-slate-50 transition">
                     <td class="p-3.5">
                         <div class="flex items-center gap-3">
-                            <img src="${img.src}"${img.dataAttr} class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.brand} ${item.model}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">ID: ${item.id}</span>
@@ -694,8 +687,7 @@ let IPHONE_TRADE_IN_RATES = [];
                         </div>
                     </td>
                 </tr>
-            `; }).join('');
-            hydrateProductImages();
+            `).join('');
         }
 
         /* POINT OF SALE (POS) TICKET ENGINE */
@@ -773,7 +765,6 @@ let IPHONE_TRADE_IN_RATES = [];
                                 brand: ph.brand,
                                 price: ph.price,
                                 cashPrice: ph.price,
-                                image: ph.image,
                                 stock: 1,
                                 type: 'phone',
                                 imei: ph.imei
@@ -788,17 +779,16 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            grid.innerHTML = itemsList.map(item => { const img = productImageMarkup(item.image); return `
+            grid.innerHTML = itemsList.map(item => `
                 <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white">
                     <div class="space-y-2">
-                        <div class="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">
-                            <img src="${img.src}"${img.dataAttr} class="w-full h-full object-cover group-hover:scale-105 transition">
-                            <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        <div class="flex min-w-0 items-start justify-between gap-2">
+                            <span class="min-w-0 truncate text-[9px] font-bold text-brand-600 uppercase tracking-wider">${item.brand}</span>
+                            <span class="shrink-0 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
                                 ${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}
                             </span>
                         </div>
                         <div>
-                            <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block">${item.brand}</span>
                             <h4 class="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">${item.title}</h4>
                         </div>
                     </div>
@@ -807,8 +797,7 @@ let IPHONE_TRADE_IN_RATES = [];
                         <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">+ Agregar</span>
                     </div>
                 </div>
-            `; }).join('');
-            hydrateProductImages();
+            `).join('');
         }
 
         function addPOSItem(id, type) {
@@ -1752,7 +1741,6 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             hideProductFeedback();
             document.getElementById('productForm').reset();
-            document.getElementById('prodExistingImage').value = '';
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
             renderCaseSubcategoryOptions();
@@ -1763,42 +1751,6 @@ let IPHONE_TRADE_IN_RATES = [];
         function closeProductModal() {
             hideProductFeedback();
             document.getElementById('productModal').classList.add('hidden');
-        }
-
-        function isFirestoreImageRef(value) {
-            return typeof value === 'string' && value.startsWith(FIRESTORE_IMAGE_PREFIX);
-        }
-
-        function productImageMarkup(image) {
-            if (isFirestoreImageRef(image)) {
-                const cached = productImageCache.get(image.slice(FIRESTORE_IMAGE_PREFIX.length));
-                return { src: cached || 'https://placehold.co/400x400/edddcc/647262?text=...', dataAttr: ` data-image-ref="${image}"` };
-            }
-            return { src: image, dataAttr: '' };
-        }
-
-        async function resolveProductImageSrc(imageRef) {
-            if (!isFirestoreImageRef(imageRef)) return imageRef;
-            const id = imageRef.slice(FIRESTORE_IMAGE_PREFIX.length);
-            if (productImageCache.has(id)) return productImageCache.get(id);
-            try {
-                const doc = await productImagesRef.doc(id).get();
-                const dataUrl = doc.exists ? doc.data().dataUrl : null;
-                if (dataUrl) productImageCache.set(id, dataUrl);
-                return dataUrl || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
-            } catch (error) {
-                console.error('No se pudo cargar la imagen del producto:', error);
-                return 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
-            }
-        }
-
-        function hydrateProductImages(root = document) {
-            root.querySelectorAll('img[data-image-ref]').forEach(img => {
-                const ref = img.getAttribute('data-image-ref');
-                if (img.dataset.imageResolved === ref) return;
-                img.dataset.imageResolved = ref;
-                resolveProductImageSrc(ref).then(src => { img.src = src; });
-            });
         }
 
         function getProductSaveErrorMessage(error) {
@@ -1833,8 +1785,6 @@ let IPHONE_TRADE_IN_RATES = [];
             const cost = parseFloat(document.getElementById('prodCost').value) || 0;
             const price = parseFloat(document.getElementById('prodPrice').value) || 0;
             const cashPrice = price;
-            const existingImage = document.getElementById('prodExistingImage').value;
-            const image = existingImage || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
@@ -1842,7 +1792,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const status = stock === 0
                 ? 'Anulado'
                 : (!existingProduct || existingProduct.stock <= 0 ? 'Activo' : existingProduct.status || 'Activo');
-            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode, status };
+            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, barcode, status };
 
             const isUpdate = existingIndex > -1;
 
@@ -1863,7 +1813,6 @@ let IPHONE_TRADE_IN_RATES = [];
                     return;
                 }
                 document.getElementById('productForm').reset();
-                document.getElementById('prodExistingImage').value = '';
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
@@ -1908,7 +1857,6 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('prodCost').value = p.cost;
             document.getElementById('prodPrice').value = p.price;
             document.getElementById('prodCashPrice').value = p.cashPrice;
-            document.getElementById('prodExistingImage').value = p.image || '';
             document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';
@@ -1964,7 +1912,6 @@ let IPHONE_TRADE_IN_RATES = [];
         function openPhoneModal() {
             if (!requireAdmin()) return;
             document.getElementById('phoneForm').reset();
-            document.getElementById('phoneExistingImage').value = '';
             document.getElementById('phoneId').value = '';
             document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
             renderPhoneIssueOptions();
@@ -2063,8 +2010,6 @@ let IPHONE_TRADE_IN_RATES = [];
             const priceUsd = currency === 'USD' ? enteredPrice : null;
             const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
-            const existingImage = document.getElementById('phoneExistingImage').value;
-            const image = existingImage || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
             const issues = condition.includes('Usado') ? [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(input => input.value) : [];
 
             if (!validatePhoneImei()) {
@@ -2072,7 +2017,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image, issues };
+            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, issues };
             const existingIndex = PHONES.findIndex(p => p.id === id);
 
             const isUpdate = existingIndex > -1;
@@ -2091,7 +2036,6 @@ let IPHONE_TRADE_IN_RATES = [];
             renderDashboard();
             renderPhonesTable();
             showToast(isUpdate ? 'Ficha de smartphone actualizada.' : 'Smartphone registrado en el stock.');
-            document.getElementById('phoneExistingImage').value = '';
             closePhoneModal();
         }
 
@@ -2115,8 +2059,6 @@ let IPHONE_TRADE_IN_RATES = [];
             updatePhonePriceLabel();
             updatePhoneConvertedPrice();
             document.getElementById('phoneStatus').value = ph.status;
-            document.getElementById('phoneExistingImage').value = ph.image || '';
-
             document.getElementById('phoneModalTitle').textContent = 'Editar Unidad Smartphone';
             document.getElementById('phoneModal').classList.remove('hidden');
         }
