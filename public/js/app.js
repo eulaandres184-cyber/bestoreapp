@@ -90,11 +90,6 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const imageStorage = firebase.storage();
-// Evita que una subida falle recién a los 2 minutos por reintentos automáticos cuando Storage no está disponible.
-imageStorage.setMaxUploadRetryTime(8000);
-imageStorage.setMaxOperationRetryTime(8000);
-let storageUploadUnavailable = false;
 const appStateRef = db.collection('app_state').doc('main');
 let currentUserProfile = null;
 let CATEGORIES = [
@@ -130,6 +125,7 @@ const PROTECTION_SUBCATEGORIES = [
     { id: '9d', name: '9D' },
     { id: 'antiespia', name: 'Antiespía' },
     { id: 'matte', name: 'Matte' },
+    { id: 'glass-camara', name: 'Glass Camara' },
     { id: 'hidrogel-matte', name: 'Hidrogel Matte' },
     { id: 'hidrogel-clear-aaa', name: 'Hidrogel Clear AAA' }
 ];
@@ -627,7 +623,6 @@ let IPHONE_TRADE_IN_RATES = [];
                 <tr class="hover:bg-slate-50 transition ${item.status === 'Anulado' ? 'opacity-60 bg-slate-100' : ''}">
                     <td class="p-3.5">
                         <div class="accessory-product-cell flex items-center gap-3">
-                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id}</span>
@@ -705,7 +700,6 @@ let IPHONE_TRADE_IN_RATES = [];
                 <tr class="hover:bg-slate-50 transition">
                     <td class="p-3.5">
                         <div class="flex items-center gap-3">
-                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.brand} ${item.model}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">ID: ${item.id}</span>
@@ -822,7 +816,6 @@ let IPHONE_TRADE_IN_RATES = [];
                                 brand: ph.brand,
                                 price: ph.price,
                                 cashPrice: ph.price,
-                                image: ph.image,
                                 stock: 1,
                                 type: 'phone',
                                 imei: ph.imei
@@ -840,14 +833,13 @@ let IPHONE_TRADE_IN_RATES = [];
             grid.innerHTML = itemsList.map(item => `
                 <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white">
                     <div class="space-y-2">
-                        <div class="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">
-                            <img src="${item.image}" class="w-full h-full object-cover group-hover:scale-105 transition">
-                            <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        <div class="flex min-w-0 items-start justify-between gap-2">
+                            <span class="min-w-0 truncate text-[9px] font-bold text-brand-600 uppercase tracking-wider">${item.brand}</span>
+                            <span class="shrink-0 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
                                 ${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}
                             </span>
                         </div>
                         <div>
-                            <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block">${item.brand}</span>
                             <h4 class="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">${item.title}</h4>
                         </div>
                     </div>
@@ -1805,7 +1797,6 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             hideProductFeedback();
             document.getElementById('productForm').reset();
-            previewImageUrl('', 'prodImagePreview');
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
             renderCaseSubcategoryOptions();
@@ -1818,83 +1809,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('productModal').classList.add('hidden');
         }
 
-        function openImageFilePicker(fileInputId) {
-            const fileInput = document.getElementById(fileInputId);
-            fileInput.value = '';
-            if (typeof fileInput.showPicker === 'function') {
-                try {
-                    fileInput.showPicker();
-                    return;
-                } catch (error) {
-                    console.warn('No se pudo abrir el selector nativo con showPicker:', error);
-                }
-            }
-            fileInput.click();
-        }
-
-        function previewSelectedImage(input, previewId) {
-            const preview = document.getElementById(previewId);
-            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
-            const file = input.files?.[0];
-            if (!file) return previewImageUrl('', previewId);
-            const urlInputId = previewId === 'prodImagePreview' ? 'prodImage' : 'phoneImage';
-            document.getElementById(urlInputId).value = '';
-            const objectUrl = URL.createObjectURL(file);
-            preview.dataset.objectUrl = objectUrl;
-            preview.src = objectUrl;
-            preview.classList.remove('hidden');
-        }
-
-        function previewImageUrl(url, previewId) {
-            const preview = document.getElementById(previewId);
-            if (url) {
-                const fileInputId = previewId === 'prodImagePreview' ? 'prodImageFile' : 'phoneImageFile';
-                document.getElementById(fileInputId).value = '';
-            }
-            if (preview.dataset.objectUrl) {
-                URL.revokeObjectURL(preview.dataset.objectUrl);
-                delete preview.dataset.objectUrl;
-            }
-            if (url) {
-                preview.src = url;
-                preview.classList.remove('hidden');
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.add('hidden');
-            }
-        }
-
-        async function uploadProductImage(file, itemId) {
-            if (!file) return null;
-            if (!file.type.startsWith('image/')) throw new Error('Selecciona un archivo de imagen válido.');
-            if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
-            const userId = firebase.auth().currentUser?.uid;
-            if (!userId) throw new Error('Inicia sesión nuevamente para subir imágenes.');
-            if (storageUploadUnavailable) {
-                const error = new Error('Firebase Storage no está disponible en este proyecto.');
-                error.code = 'storage/bucket-not-found';
-                throw error;
-            }
-            const extension = file.name.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
-            const imageRef = imageStorage.ref(`product-images/${userId}/${itemId}-${Date.now()}.${extension}`);
-            try {
-                const snapshot = await imageRef.put(file, { contentType: file.type });
-                return await snapshot.ref.getDownloadURL();
-            } catch (error) {
-                if (error.code?.startsWith('storage/')) storageUploadUnavailable = true;
-                throw error;
-            }
-        }
-
         function getProductSaveErrorMessage(error) {
-            if (['storage/bucket-not-found', 'storage/no-default-bucket'].includes(error.code)) {
-                return 'Firebase Storage no está inicializado. Activa Storage en Firebase Console para cargar archivos; puedes pegar una URL mientras tanto.';
-            }
-            if (error.code?.startsWith('storage/') || /Firebase Storage has not been set up/i.test(error.message || '')) {
-                return `No se pudo subir la imagen a Firebase Storage (${error.code || 'error'}). Verifica que Storage esté inicializado y que sus reglas permitan la carga.`;
-            }
             if (['resource-exhausted', 'firestore/resource-exhausted'].includes(error.code)) {
-                return 'Firestore rechazó los datos por superar el límite de tamaño del documento. Guarda las imágenes en Storage y conserva solo sus URL.';
+                return 'Firestore rechazó los datos por superar el límite de tamaño del documento. Probá con una imagen más liviana.';
             }
             if (['permission-denied', 'firestore/permission-denied'].includes(error.code)) {
                 return 'Firebase rechazó el guardado por permisos. Verifica que tu usuario tenga rol de administrador.';
@@ -1924,19 +1841,18 @@ let IPHONE_TRADE_IN_RATES = [];
             const cost = parseFloat(document.getElementById('prodCost').value) || 0;
             const price = parseFloat(document.getElementById('prodPrice').value) || 0;
             const cashPrice = price;
-            let image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
-            const imageFile = document.getElementById('prodImageFile').files[0];
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
-            const status = stock === 0 ? 'Anulado' : (existingIndex > -1 ? PRODUCTS[existingIndex].status || 'Activo' : 'Activo');
-            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode, status };
+            const existingProduct = existingIndex > -1 ? PRODUCTS[existingIndex] : null;
+            const status = stock === 0
+                ? 'Anulado'
+                : (!existingProduct || existingProduct.stock <= 0 ? 'Activo' : existingProduct.status || 'Activo');
+            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, barcode, status };
 
             const isUpdate = existingIndex > -1;
 
             try {
-                if (imageFile) image = await uploadProductImage(imageFile, id);
-                productObj.image = image;
                 if (isUpdate) {
                     PRODUCTS[existingIndex] = productObj;
                 } else {
@@ -1953,7 +1869,6 @@ let IPHONE_TRADE_IN_RATES = [];
                     return;
                 }
                 document.getElementById('productForm').reset();
-                previewImageUrl('', 'prodImagePreview');
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
@@ -1998,9 +1913,6 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('prodCost').value = p.cost;
             document.getElementById('prodPrice').value = p.price;
             document.getElementById('prodCashPrice').value = p.cashPrice;
-            document.getElementById('prodImageFile').value = '';
-            document.getElementById('prodImage').value = p.image;
-            previewImageUrl(p.image, 'prodImagePreview');
             document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';
@@ -2056,7 +1968,6 @@ let IPHONE_TRADE_IN_RATES = [];
         function openPhoneModal() {
             if (!requireAdmin()) return;
             document.getElementById('phoneForm').reset();
-            previewImageUrl('', 'phoneImagePreview');
             document.getElementById('phoneId').value = '';
             document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
             renderPhoneIssueOptions();
@@ -2155,8 +2066,6 @@ let IPHONE_TRADE_IN_RATES = [];
             const priceUsd = currency === 'USD' ? enteredPrice : null;
             const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
-            let image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
-            const imageFile = document.getElementById('phoneImageFile').files[0];
             const issues = condition.includes('Usado') ? [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(input => input.value) : [];
 
             if (!validatePhoneImei()) {
@@ -2164,15 +2073,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image, issues };
+            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, issues };
             const existingIndex = PHONES.findIndex(p => p.id === id);
-
-            try {
-                if (imageFile) phoneObj.image = await uploadProductImage(imageFile, id);
-            } catch (error) {
-                showToast(error.message || 'No se pudo subir la imagen.');
-                return;
-            }
 
             const isUpdate = existingIndex > -1;
             if (isUpdate) {
@@ -2213,10 +2115,6 @@ let IPHONE_TRADE_IN_RATES = [];
             updatePhonePriceLabel();
             updatePhoneConvertedPrice();
             document.getElementById('phoneStatus').value = ph.status;
-            document.getElementById('phoneImageFile').value = '';
-            document.getElementById('phoneImage').value = ph.image;
-            previewImageUrl(ph.image, 'phoneImagePreview');
-
             document.getElementById('phoneModalTitle').textContent = 'Editar Unidad Smartphone';
             document.getElementById('phoneModal').classList.remove('hidden');
         }
