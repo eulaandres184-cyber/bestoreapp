@@ -1441,6 +1441,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
             document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
+            document.getElementById('finalizeWithoutReceiptBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
             document.getElementById('receiptModal').classList.remove('hidden');
         }
 
@@ -1452,9 +1453,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('receiptModal').classList.add('hidden');
         }
 
-        async function finalizePendingSale(deliveryMethod) {
+        async function finalizePendingSale(deliveryMethod = 'Sin emisión') {
             const sale = SALES.find(item => item.id === pendingSaleId);
-            if (!sale || sale.status !== 'Pendiente de emisión' || posOperationInProgress === false) return;
+            if (!sale || sale.status !== 'Pendiente de emisión') return;
             sale.status = 'Confirmada';
             sale.deliveryMethod = deliveryMethod;
             sale.items.forEach(item => {
@@ -1472,7 +1473,7 @@ let IPHONE_TRADE_IN_RATES = [];
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = false;
-            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Finalizar venta</span>';
             renderPOSTicket();
             renderDashboard();
             renderSalesTable();
@@ -1496,7 +1497,7 @@ let IPHONE_TRADE_IN_RATES = [];
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = false;
-            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Finalizar venta</span>';
             await saveLocalState();
             renderPOSTicket();
             renderDashboard();
@@ -1509,6 +1510,12 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function printReceipt() {
+            if (!lastCreatedSale) return;
+            const previousTitle = document.title;
+            document.title = lastCreatedSale.id;
+            window.addEventListener('afterprint', () => {
+                document.title = previousTitle;
+            }, { once: true });
             window.print();
             if (pendingSaleId) await finalizePendingSale('Impreso');
         }
