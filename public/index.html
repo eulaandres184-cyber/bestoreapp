@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BE STORE APP </title>
+    <meta name="theme-color" content="#ffffff">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <title>BE STORE APP</title>
 
     <!-- Application scripts -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -446,15 +450,10 @@
                             <div id="mixedPaymentFields" class="hidden grid grid-cols-2 gap-2 mt-2">
                                 <input id="mixedCashAmount" type="number" min="0" oninput="syncMixedPayment('cash')" placeholder="Efectivo / transferencia" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                                 <input id="mixedCardAmount" type="number" min="0" oninput="syncMixedPayment('card')" placeholder="Tarjeta" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                                <p class="col-span-2 text-[10px] text-slate-500">Los importes se completan sobre el saldo neto. La comisión e IVA de la tarjeta se suman al total final.</p>
+                                <p class="col-span-2 text-[10px] text-slate-500">Los importes se completan sobre el saldo neto. El recargo de la tarjeta se suma según el plan seleccionado.</p>
                             </div>
-                            <select id="cardPlanSelect" onchange="calculatePOSTotals()" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold">
-                                <option value="mp-single">Mercado Pago - 1 pago (6,49% comisión)</option>
-                                <option value="mp-3">Mercado Pago - 3 cuotas (12,49% comisión)</option>
-                                <option value="pampa-4">Banco Pampa - 4 cuotas sin interés</option>
-                                <option value="pampa-20">Banco Pampa - 20 cuotas (+20%)</option>
-                            </select>
-                            <p class="text-[10px] text-slate-500 mt-1">Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.</p>
+                            <select id="cardPlanSelect" onchange="calculatePOSTotals()" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold"></select>
+                            <p id="cardPlanHint" class="text-[10px] text-slate-500 mt-1">Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.</p>
                         </div>
 
                         <!-- Trade-in Deduction Option -->

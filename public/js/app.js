@@ -109,6 +109,15 @@ const CARD_PLANS = {
     'pampa-4': { label: 'Banco Pampa - 4 cuotas', rate: 0 },
     'pampa-20': { label: 'Banco Pampa - 20 cuotas', rate: 0.20 }
 };
+const PHONE_CARD_PLANS = {
+    'phone-mp-3': { label: 'Mercado Pago - 3 cuotas', provider: 'mp', rate: 0.062 },
+    'phone-mp-6': { label: 'Mercado Pago - 6 cuotas', provider: 'mp', rate: 0.103 },
+    'phone-mp-9': { label: 'Mercado Pago - 9 cuotas', provider: 'mp', rate: 0.153 },
+    'phone-mp-12': { label: 'Mercado Pago - 12 cuotas', provider: 'mp', rate: 0.195 },
+    'phone-pampa-4': { label: 'Banco Pampa - 4 cuotas', provider: 'pampa', rate: 0.02 },
+    'phone-pampa-20': { label: 'Banco Pampa - 20 cuotas', provider: 'pampa', rate: 0.245 }
+};
+const MERCADO_PAGO_BASE_COMMISSION_RATE = 0.0435;
 const MERCADO_PAGO_VAT_RATE = 0.21;
 const DATA_VERSION = 2;
 let CASE_SUBCATEGORIES = [
@@ -521,8 +530,50 @@ let IPHONE_TRADE_IN_RATES = [];
             return CARD_PLANS[document.getElementById('cardPlanSelect').value]?.rate || 0;
         }
 
+        function updatePOSCardPlanOptions() {
+            const select = document.getElementById('cardPlanSelect');
+            const hasPhone = posState.ticket.some(item => item.type === 'phone');
+            const plans = hasPhone ? PHONE_CARD_PLANS : CARD_PLANS;
+            const currentPlanId = select.value;
+            if (select.dataset.phonePlans === String(hasPhone)) return;
+
+            select.innerHTML = Object.entries(plans).map(([id, plan]) => {
+                if (!hasPhone) {
+                    return `<option value="${id}">${plan.label} (${(plan.rate * 100).toLocaleString('es-AR')}% comisión)</option>`;
+                }
+                const totalCost = plan.provider === 'mp'
+                    ? (plan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE) * (1 + MERCADO_PAGO_VAT_RATE)
+                    : plan.rate;
+                return `<option value="${id}">${plan.label} (costo ${ (totalCost * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 }) }%)</option>`;
+            }).join('');
+            select.value = Object.prototype.hasOwnProperty.call(plans, currentPlanId)
+                ? currentPlanId
+                : Object.keys(plans)[0];
+            select.dataset.phonePlans = String(hasPhone);
+
+            const hint = document.getElementById('cardPlanHint');
+            hint.textContent = hasPhone
+                ? 'Mismos parámetros para celulares nuevos y usados. Precio en cuotas = efectivo / (1 - costo total), redondeado a $100.'
+                : 'Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.';
+        }
+
         function calculateCardCharges(cardAmount) {
             const planId = document.getElementById('cardPlanSelect').value;
+            const phonePlan = PHONE_CARD_PLANS[planId];
+            if (phonePlan) {
+                const totalCostRate = phonePlan.provider === 'mp'
+                    ? (phonePlan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE) * (1 + MERCADO_PAGO_VAT_RATE)
+                    : phonePlan.rate;
+                const cardTotal = Math.round((cardAmount / (1 - totalCostRate)) / 100) * 100;
+                const commissionRate = phonePlan.provider === 'mp'
+                    ? phonePlan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE
+                    : phonePlan.rate;
+                const commission = Math.round(cardTotal * commissionRate);
+                const vat = phonePlan.provider === 'mp'
+                    ? Math.round(commission * MERCADO_PAGO_VAT_RATE)
+                    : 0;
+                return { commission, vat, total: cardTotal - cardAmount };
+            }
             const plan = CARD_PLANS[planId] || { rate: 0 };
             const commission = Math.round(cardAmount * plan.rate);
             const vat = planId.startsWith('mp-') ? Math.round(commission * MERCADO_PAGO_VAT_RATE) : 0;
@@ -972,6 +1023,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
         function renderPOSTicket() {
             const container = document.getElementById('posTicketList');
+            updatePOSCardPlanOptions();
 
             if (posState.ticket.length === 0) {
                 container.innerHTML = `
@@ -1020,7 +1072,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
-            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (comisión + IVA)`;
+            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (${posState.ticket.some(item => item.type === 'phone') ? 'costo cuotas' : 'cargo por tarjeta'})`;
             let finalTotal = Math.max(0, subtotal + surcharge - canjeVal);
 
             document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
@@ -1084,6 +1136,9 @@ let IPHONE_TRADE_IN_RATES = [];
                 items: posState.ticket.map(item => ({ ...item })),
                 status: 'Pendiente de emisión',
                 paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : posState.paymentMethod === 'account' ? 'Cuenta corriente' : 'Tarjeta/Cuotas',
+                cardPlan: posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card'
+                    ? (PHONE_CARD_PLANS[document.getElementById('cardPlanSelect').value] || CARD_PLANS[document.getElementById('cardPlanSelect').value])?.label || ''
+                    : '',
                 paymentBreakdown: { cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'transfer' ? total : 0, card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0 },
                 cardCommission: cardCharges.commission,
                 cardCommissionVat: cardCharges.vat,
@@ -1273,6 +1328,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 <div><strong>Cliente:</strong> ${sale.customerName}</div>
                 ${sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
                 <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
+                ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
             `;
 
             document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
