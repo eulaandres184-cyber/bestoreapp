@@ -143,12 +143,15 @@ let IPHONE_TRADE_IN_RATES = [];
         let PHONES = [];
         let SALES = [];
         let CLIENTS = [];
-        let cashRegister = { date: '', openingCash: 0, open: false };
+        let SUPPLIERS = [];
+        let PURCHASES = [];
+        let SUPPLIER_PAYMENTS = [];
+        let cashRegister = { date: '', openingCash: 0, openingBank: 0, openingMp: 0, open: false };
         let dailyDollarRate = 0;
 
         let posState = {
             ticket: [],
-            paymentMethod: 'transfer', // 'transfer' or 'card'
+            paymentMethod: 'cash',
             selectedCategory: 'ALL',
             phoneConditionFilter: 'ALL'
         };
@@ -261,6 +264,7 @@ let IPHONE_TRADE_IN_RATES = [];
             renderCategorySelects();
             renderCategoriesPage();
             renderClients();
+            renderSuppliers();
             await loadIphoneTradeInRates();
             updateCanjeModelOptions();
             applyRoleAccess();
@@ -285,7 +289,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('newProductButton'),
                 document.getElementById('newPhoneButton'),
                 document.getElementById('newCategoryButton'),
-                document.getElementById('intakeUsedPhoneButton')
+                document.getElementById('intakeUsedPhoneButton'),
+                document.getElementById('nav-suppliers')
             ];
             adminOnlyElements.filter(Boolean).forEach(element => element.classList.toggle('hidden', !isAdmin()));
             const dollarInput = document.getElementById('dailyDollarRate');
@@ -405,7 +410,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
         /* NAVIGATION & TAB SWITCHING */
         function switchTab(tabId) {
-            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients'];
+            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients', 'suppliers'];
             
             tabs.forEach(t => {
                 const navBtn = document.getElementById(`nav-${t}`);
@@ -430,6 +435,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 'inventory-phones': '<i class="fa-solid fa-mobile-screen-button text-purple-600"></i> Stock de Celulares (Nuevos/Usados)',
                 'sales-history': '<i class="fa-solid fa-receipt text-slate-600"></i> Historial de Ventas',
                 'canje-calculator': '<i class="fa-solid fa-arrows-rotate text-emerald-600"></i> Cotizador Plan Canje',
+                'suppliers': '<i class="fa-solid fa-truck-field text-sky-600"></i> Proveedores',
             };
             document.getElementById('pageTitle').innerHTML = titles[tabId] || 'BE STORE System';
 
@@ -441,6 +447,9 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderCategoriesPage();
             } else if (tabId === 'clients') {
                 renderClients();
+            } else if (tabId === 'suppliers') {
+                if (!requireAdmin()) return switchTab('dashboard');
+                renderSuppliers();
             }
         }
 
@@ -831,7 +840,7 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             grid.innerHTML = itemsList.map(item => `
-                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white">
+                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white max-w-[200px] min-h-[130px] max-h-[200px]">
                     <div class="space-y-2">
                         <div class="flex min-w-0 items-start justify-between gap-2">
                             <span class="min-w-0 truncate text-[9px] font-bold text-brand-600 uppercase tracking-wider">${item.brand}</span>
@@ -973,42 +982,24 @@ let IPHONE_TRADE_IN_RATES = [];
 
         function setPOSPaymentMethod(method) {
             posState.paymentMethod = method;
-            const btnTransf = document.getElementById('posPayTransfer');
-            const btnCard = document.getElementById('posPayCard');
-            const btnMixed = document.getElementById('posPayMixed');
-            const btnAccount = document.getElementById('posPayAccount');
-            const mixedFields = document.getElementById('mixedPaymentFields');
-            posState.paymentMethod = method;
+            const buttons = {
+                cash: document.getElementById('posPayCash'),
+                transfer: document.getElementById('posPayTransfer'),
+                card: document.getElementById('posPayCard'),
+                mixed: document.getElementById('posPayMixed'),
+                account: document.getElementById('posPayAccount')
+            };
+            const selectedClass = method === 'cash'
+                ? 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition'
+                : 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
+            const defaultClass = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            Object.entries(buttons).forEach(([key, button]) => {
+                button.className = key === method ? selectedClass : defaultClass;
+            });
 
-            if (method === 'transfer') {
-                document.getElementById('cardPlanSelect').classList.add('hidden');
-                mixedFields.classList.add('hidden');
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else if (method === 'mixed') {
-                document.getElementById('cardPlanSelect').classList.remove('hidden');
-                mixedFields.classList.remove('hidden');
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else if (method === 'account') {
-                document.getElementById('cardPlanSelect').classList.add('hidden');
-                mixedFields.classList.add('hidden');
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else {
-                document.getElementById('cardPlanSelect').classList.remove('hidden');
-                mixedFields.classList.add('hidden');
-                btnCard.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            }
+            const isCardPayment = method === 'card' || method === 'mixed';
+            document.getElementById('cardPlanSelect').classList.toggle('hidden', !isCardPayment);
+            document.getElementById('mixedPaymentFields').classList.toggle('hidden', method !== 'mixed');
 
             calculatePOSTotals();
         }
@@ -1060,7 +1051,7 @@ let IPHONE_TRADE_IN_RATES = [];
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
-            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : Math.max(0, subtotal - canjeVal);
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'account' ? 0 : Math.max(0, subtotal - canjeVal);
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
@@ -1069,19 +1060,6 @@ let IPHONE_TRADE_IN_RATES = [];
 
             document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
             document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
-        }
-
-        function syncMixedPayment(source) {
-            const subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
-            const amountDue = Math.max(0, subtotal - canjeVal);
-            const sourceInput = document.getElementById(source === 'cash' ? 'mixedCashAmount' : 'mixedCardAmount');
-            const otherInput = document.getElementById(source === 'cash' ? 'mixedCardAmount' : 'mixedCashAmount');
-            const sourceAmount = Math.min(Math.max(0, parseFloat(sourceInput.value) || 0), amountDue);
-
-            sourceInput.value = sourceAmount || '';
-            otherInput.value = sourceAmount < amountDue ? amountDue - sourceAmount : '';
-            calculatePOSTotals();
         }
 
         function processPOSCheckout() {
@@ -1101,13 +1079,18 @@ let IPHONE_TRADE_IN_RATES = [];
 
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const mixedCash = parseFloat(document.getElementById('mixedCashAmount').value) || 0;
+            const mixedTransfer = parseFloat(document.getElementById('mixedTransferAmount').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
             const netTotal = Math.max(0, subtotal - canjeVal);
-            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) > Math.round(netTotal)) {
+            if (posState.paymentMethod === 'mixed' && [mixedCash, mixedTransfer, mixedCard].some(amount => amount < 0)) {
+                showToast('Los importes del pago mixto no pueden ser negativos.');
+                return;
+            }
+            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedTransfer + mixedCard) > Math.round(netTotal)) {
                 showToast('El pago mixto no puede superar el importe a cobrar.');
                 return;
             }
-            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) !== Math.round(netTotal)) {
+            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedTransfer + mixedCard) !== Math.round(netTotal)) {
                 showToast('El pago mixto debe completar el importe a cobrar.');
                 return;
             }
@@ -1127,11 +1110,15 @@ let IPHONE_TRADE_IN_RATES = [];
                 customerPhone: customerPhone,
                 items: posState.ticket.map(item => ({ ...item })),
                 status: 'Pendiente de emisión',
-                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : posState.paymentMethod === 'account' ? 'Cuenta corriente' : 'Tarjeta/Cuotas',
+                paymentMethod: posState.paymentMethod === 'cash' ? 'Efectivo' : posState.paymentMethod === 'transfer' ? 'Transferencia (Mercado Pago)' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : posState.paymentMethod === 'account' ? 'Cuenta corriente' : 'Tarjeta/Cuotas',
                 cardPlan: posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card'
                     ? (PHONE_CARD_PLANS[document.getElementById('cardPlanSelect').value] || CARD_PLANS[document.getElementById('cardPlanSelect').value])?.label || ''
                     : '',
-                paymentBreakdown: { cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'transfer' ? total : 0, card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0 },
+                paymentBreakdown: {
+                    cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'cash' ? total : 0,
+                    transfer: posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'transfer' ? total : 0,
+                    card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0
+                },
                 cardCommission: cardCharges.commission,
                 cardCommissionVat: cardCharges.vat,
                 canjeDeduction: canjeVal,
@@ -1169,36 +1156,59 @@ let IPHONE_TRADE_IN_RATES = [];
             return new Date().toLocaleDateString('es-AR');
         }
 
+        function getSalePaymentBreakdown(sale) {
+            if (sale.paymentBreakdown) {
+                return {
+                    cash: sale.paymentBreakdown.cash || 0,
+                    transfer: sale.paymentBreakdown.transfer || 0,
+                    card: sale.paymentBreakdown.card || 0
+                };
+            }
+            if (sale.paymentMethod === 'Tarjeta/Cuotas') return { cash: 0, transfer: 0, card: sale.total };
+            return { cash: sale.total, transfer: 0, card: 0 };
+        }
+
         function renderCashRegister() {
             const today = cashRegisterDate();
             const todaySales = SALES.filter(sale => sale.date.includes(today) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
             const totals = todaySales.reduce((result, sale) => {
-                const breakdown = sale.paymentBreakdown || {
-                    cash: sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total,
-                    card: sale.paymentMethod === 'Tarjeta/Cuotas' ? sale.total : 0
-                };
+                const breakdown = getSalePaymentBreakdown(sale);
                 result.cash += breakdown.cash || 0;
+                result.transfer += breakdown.transfer || 0;
                 result.card += breakdown.card || 0;
                 return result;
-            }, { cash: 0, card: 0 });
+            }, { cash: 0, transfer: 0, card: 0 });
             const opening = cashRegister.date === today ? cashRegister.openingCash : 0;
-            const status = cashRegister.date === today && cashRegister.open ? `Abierta con $${opening.toLocaleString('es-AR')} de fondo` : 'Caja cerrada';
+            const supplierCash = supplierCashPaidOn(today);
+            const sameDay = cashRegister.date === today;
+            const openingBank = sameDay ? (cashRegister.openingBank || 0) : 0;
+            const openingMp = sameDay ? (cashRegister.openingMp || 0) : 0;
+            const fmt = value => `$${value.toLocaleString('es-AR')}`;
+            const status = sameDay && cashRegister.open ? `Abierta con ${fmt(opening)} en efectivo, ${fmt(openingBank)} en bancos y ${fmt(openingMp)} en Mercado Pago` : 'Caja cerrada';
             document.getElementById('cashRegisterStatus').textContent = status;
             document.getElementById('cashRegisterSummary').innerHTML = `
-                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Efectivo / transferencia</span><strong class="text-slate-900">$${totals.cash.toLocaleString('es-AR')}</strong></div>
-                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Tarjetas</span><strong class="text-slate-900">$${totals.card.toLocaleString('es-AR')}</strong></div>
-                <div class="bg-emerald-50 rounded-xl p-3"><span class="block text-emerald-700">Efectivo esperado</span><strong class="text-emerald-800">$${(opening + totals.cash).toLocaleString('es-AR')}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Ventas en efectivo</span><strong class="text-slate-900">${fmt(totals.cash)}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Transferencias / Mercado Pago</span><strong class="text-slate-900">${fmt(totals.transfer)}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Tarjetas</span><strong class="text-slate-900">${fmt(totals.card)}</strong></div>
+                <div class="bg-emerald-50 rounded-xl p-3"><span class="block text-emerald-700">Efectivo esperado</span><strong class="text-emerald-800">${fmt(opening + totals.cash - supplierCash)}</strong>${supplierCash ? `<span class="block text-[10px] text-emerald-700">Incluye -${fmt(supplierCash)} pagados a proveedores</span>` : ''}</div>
+                <div class="bg-sky-50 rounded-xl p-3"><span class="block text-sky-700">Mercado Pago esperado</span><strong class="text-sky-800">${fmt(openingMp + totals.transfer)}</strong></div>
             `;
         }
 
         async function openCashRegister() {
             if (!requireAdmin()) return;
-            const opening = parseFloat(document.getElementById('openingCashInput').value);
-            if (!Number.isFinite(opening) || opening < 0) {
-                showToast('Ingresa un fondo inicial válido para abrir la caja.');
+            const readAmount = id => {
+                const raw = document.getElementById(id).value.trim();
+                return raw === '' ? 0 : parseFloat(raw);
+            };
+            const opening = readAmount('openingCashInput');
+            const openingBank = readAmount('openingBankInput');
+            const openingMp = readAmount('openingMpInput');
+            if ([opening, openingBank, openingMp].some(value => !Number.isFinite(value) || value < 0)) {
+                showToast('Ingresa importes iniciales válidos para abrir la caja.');
                 return;
             }
-            cashRegister = { date: cashRegisterDate(), openingCash: opening, open: true };
+            cashRegister = { date: cashRegisterDate(), openingCash: opening, openingBank, openingMp, open: true };
             await saveLocalState();
             renderCashRegister();
             showToast('Caja abierta correctamente.');
@@ -1211,8 +1221,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
             const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
-            const cashSales = todaySales.reduce((sum, sale) => sum + (sale.paymentBreakdown?.cash || (sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total)), 0);
-            const expectedAmount = cashRegister.openingCash + cashSales;
+            const cashSales = todaySales.reduce((sum, sale) => sum + getSalePaymentBreakdown(sale).cash, 0);
+            const expectedAmount = cashRegister.openingCash + cashSales - supplierCashPaidOn(cashRegisterDate());
             const expected = `$${expectedAmount.toLocaleString('es-AR')}`;
             const actual = window.prompt(`Efectivo real contado (esperado ${expected}):`, '0');
             if (actual === null) return;
@@ -1257,11 +1267,105 @@ let IPHONE_TRADE_IN_RATES = [];
                         <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
                             <i class="fa-solid fa-receipt"></i>
                         </button>
+                        ${isAdmin() && sale.status === 'Confirmada' && sale.paymentMethod !== 'Cuenta corriente' ? `<button onclick="openSalePaymentModal('${sale.id}')" class="p-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs" title="Modificar medio de pago"><i class="fa-solid fa-money-bill-transfer"></i></button>` : ''}
                         ${isAdmin() && sale.status !== 'Anulada' ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
                         ${isAdmin() ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
+        }
+
+        function getSalePaymentMethodKey(sale) {
+            if (sale.paymentMethod === 'Efectivo') return 'cash';
+            if (sale.paymentMethod === 'Transferencia (Mercado Pago)') return 'transfer';
+            if (sale.paymentMethod === 'Tarjeta/Cuotas' || sale.paymentMethod === 'Tarjeta') return 'card';
+            if (sale.paymentMethod === 'Pago mixto') return 'mixed';
+            return 'cash';
+        }
+
+        function openSalePaymentModal(saleId) {
+            if (!requireAdmin()) return;
+            const sale = SALES.find(item => item.id === saleId);
+            if (!sale || sale.status !== 'Confirmada' || sale.paymentMethod === 'Cuenta corriente') {
+                showToast('Solo puedes modificar el medio de pago de una venta ya realizada.');
+                return;
+            }
+            const breakdown = getSalePaymentBreakdown(sale);
+            document.getElementById('salePaymentId').value = sale.id;
+            document.getElementById('salePaymentReference').textContent = `Ticket ${sale.id} · Total $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
+            document.getElementById('salePaymentMethod').value = getSalePaymentMethodKey(sale);
+            document.getElementById('saleMixedCash').value = breakdown.cash || 0;
+            document.getElementById('saleMixedTransfer').value = breakdown.transfer || 0;
+            document.getElementById('saleMixedCard').value = breakdown.card || 0;
+            toggleSaleMixedPaymentFields();
+            document.getElementById('salePaymentModal').classList.remove('hidden');
+        }
+
+        function toggleSaleMixedPaymentFields() {
+            const sale = SALES.find(item => item.id === document.getElementById('salePaymentId').value);
+            const isMixed = document.getElementById('salePaymentMethod').value === 'mixed';
+            document.getElementById('saleMixedPaymentFields').classList.toggle('hidden', !isMixed);
+            if (sale) {
+                document.getElementById('saleMixedPaymentTotal').textContent = `La suma debe ser igual al total de $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}.`;
+            }
+        }
+
+        function closeSalePaymentModal() {
+            document.getElementById('salePaymentModal').classList.add('hidden');
+        }
+
+        async function saveSalePaymentMethod(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+            const sale = SALES.find(item => item.id === document.getElementById('salePaymentId').value);
+            if (!sale || sale.status !== 'Confirmada' || sale.paymentMethod === 'Cuenta corriente') {
+                closeSalePaymentModal();
+                showToast('Solo puedes modificar el medio de pago de una venta ya realizada.');
+                return;
+            }
+
+            const method = document.getElementById('salePaymentMethod').value;
+            const methods = {
+                cash: 'Efectivo',
+                transfer: 'Transferencia (Mercado Pago)',
+                card: 'Tarjeta',
+                mixed: 'Pago mixto'
+            };
+            if (!Object.prototype.hasOwnProperty.call(methods, method)) {
+                showToast('Selecciona una forma de pago válida.');
+                return;
+            }
+
+            let paymentBreakdown;
+            if (method === 'mixed') {
+                const cash = parseFloat(document.getElementById('saleMixedCash').value);
+                const transfer = parseFloat(document.getElementById('saleMixedTransfer').value);
+                const card = parseFloat(document.getElementById('saleMixedCard').value);
+                if ([cash, transfer, card].some(amount => !Number.isFinite(amount) || amount < 0)) {
+                    showToast('Ingresa importes válidos y no negativos para el pago mixto.');
+                    return;
+                }
+                const allocatedCents = [cash, transfer, card].reduce((sum, amount) => sum + Math.round(amount * 100), 0);
+                if (allocatedCents !== Math.round(sale.total * 100)) {
+                    showToast(`Los importes del pago mixto deben sumar $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}.`);
+                    return;
+                }
+                paymentBreakdown = { cash, transfer, card };
+            } else {
+                paymentBreakdown = {
+                    cash: method === 'cash' ? sale.total : 0,
+                    transfer: method === 'transfer' ? sale.total : 0,
+                    card: method === 'card' ? sale.total : 0
+                };
+            }
+
+            sale.paymentMethod = methods[method];
+            sale.paymentBreakdown = paymentBreakdown;
+            await saveLocalState();
+            renderSalesTable();
+            renderDashboard();
+            closeSalePaymentModal();
+            showToast('Medio de pago actualizado. El total de la venta no cambió.');
         }
 
         async function cancelSale(saleId) {
@@ -1320,7 +1424,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 <div><strong>Cliente:</strong> ${sale.customerName}</div>
                 ${sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
                 <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
-                ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
+                ${sale.cardPlan && (sale.paymentMethod === 'Tarjeta/Cuotas' || sale.paymentMethod === 'Tarjeta' || sale.paymentMethod === 'Pago mixto') ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
             `;
 
             document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
@@ -2135,6 +2239,9 @@ let IPHONE_TRADE_IN_RATES = [];
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
             localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+            localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
+            localStorage.setItem('bestore_internal_purchases', JSON.stringify(PURCHASES));
+            localStorage.setItem('bestore_internal_supplier_payments', JSON.stringify(SUPPLIER_PAYMENTS));
             localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
             localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
             localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
@@ -2157,6 +2264,9 @@ let IPHONE_TRADE_IN_RATES = [];
                         phones: PHONES,
                         sales: SALES,
                         clients: CLIENTS,
+                        suppliers: SUPPLIERS,
+                        purchases: PURCHASES,
+                        supplierPayments: SUPPLIER_PAYMENTS,
                         categories: CATEGORIES,
                         caseSubcategories: CASE_SUBCATEGORIES,
                         phoneIssues: PHONE_ISSUES,
@@ -2188,6 +2298,10 @@ let IPHONE_TRADE_IN_RATES = [];
             if (s) try { SALES = JSON.parse(s); } catch(e){}
             const c = localStorage.getItem('bestore_internal_clients');
             if (c) try { CLIENTS = JSON.parse(c); } catch(e){}
+            [['bestore_internal_suppliers', value => SUPPLIERS = value], ['bestore_internal_purchases', value => PURCHASES = value], ['bestore_internal_supplier_payments', value => SUPPLIER_PAYMENTS = value]].forEach(([key, assign]) => {
+                const stored = localStorage.getItem(key);
+                if (stored) try { assign(JSON.parse(stored)); } catch(e){}
+            });
             const cash = localStorage.getItem('bestore_internal_cash_register');
             if (cash) try { cashRegister = JSON.parse(cash); } catch(e){}
             const dollar = localStorage.getItem('bestore_internal_dollar_rate');
@@ -2207,6 +2321,9 @@ let IPHONE_TRADE_IN_RATES = [];
                     PHONES = remoteState.phones || PHONES;
                     SALES = remoteState.sales || SALES;
                     CLIENTS = remoteState.clients || CLIENTS;
+                    SUPPLIERS = remoteState.suppliers || SUPPLIERS;
+                    PURCHASES = remoteState.purchases || PURCHASES;
+                    SUPPLIER_PAYMENTS = remoteState.supplierPayments || SUPPLIER_PAYMENTS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
                     CASE_SUBCATEGORIES = remoteState.caseSubcategories || CASE_SUBCATEGORIES;
                     PHONE_ISSUES = remoteState.phoneIssues || PHONE_ISSUES;
@@ -2217,6 +2334,9 @@ let IPHONE_TRADE_IN_RATES = [];
                     localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
                     localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
                     localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+            localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
+            localStorage.setItem('bestore_internal_purchases', JSON.stringify(PURCHASES));
+            localStorage.setItem('bestore_internal_supplier_payments', JSON.stringify(SUPPLIER_PAYMENTS));
                     localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
                     localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
                     localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
