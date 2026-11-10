@@ -107,6 +107,12 @@
                     <i class="fa-solid fa-receipt text-slate-500 w-4 text-center"></i>
                     <span>Historial de Ventas</span>
                 </button>
+                <button onclick="switchTab('returns')" id="nav-returns" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-arrow-rotate-left text-amber-600 w-4 text-center"></i><span>Devoluciones</span>
+                </button>
+                <button onclick="switchTab('defectives')" id="nav-defectives" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-triangle-exclamation text-red-600 w-4 text-center"></i><span>Productos defectuosos</span>
+                </button>
                 <button onclick="switchTab('canje-calculator')" id="nav-canje-calculator" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-arrows-rotate text-emerald-500 w-4 text-center"></i>
                     <span>Plan Canje & Usados</span>
@@ -150,9 +156,12 @@
         <button onclick="switchTab('inventory-acc')" data-tab-nav="inventory-acc" class="mobile-nav-item" title="Accesorios"><i class="fa-solid fa-boxes-stacked"></i><span>Stock</span></button>
         <button onclick="switchTab('inventory-phones')" data-tab-nav="inventory-phones" class="mobile-nav-item" title="Celulares"><i class="fa-solid fa-mobile-screen-button"></i><span>Celulares</span></button>
         <button onclick="switchTab('sales-history')" data-tab-nav="sales-history" class="mobile-nav-item" title="Ventas"><i class="fa-solid fa-receipt"></i><span>Ventas</span></button>
+        <button onclick="switchTab('returns')" data-tab-nav="returns" class="mobile-nav-item" title="Devoluciones"><i class="fa-solid fa-arrow-rotate-left"></i><span>Devoluciones</span></button>
+        <button onclick="switchTab('defectives')" data-tab-nav="defectives" class="mobile-nav-item" title="Defectuosos"><i class="fa-solid fa-triangle-exclamation"></i><span>Defectuosos</span></button>
         <button onclick="switchTab('canje-calculator')" data-tab-nav="canje-calculator" class="mobile-nav-item" title="Plan canje"><i class="fa-solid fa-arrows-rotate"></i><span>Canje</span></button>
         <button onclick="switchTab('categories')" data-tab-nav="categories" class="mobile-nav-item" title="Categorías"><i class="fa-solid fa-tags"></i><span>Categorías</span></button>
         <button onclick="switchTab('clients')" data-tab-nav="clients" class="mobile-nav-item" title="Clientes"><i class="fa-solid fa-users"></i><span>Clientes</span></button>
+        <button onclick="switchTab('suppliers')" id="mobile-nav-suppliers" data-tab-nav="suppliers" class="mobile-nav-item hidden" title="Proveedores"><i class="fa-solid fa-truck-field"></i><span>Proveedores</span></button>
         <button onclick="openUserModal()" class="mobile-nav-item" title="Usuarios"><i class="fa-solid fa-users-gear"></i><span>Usuarios</span></button>
     </nav>
 
@@ -670,6 +679,46 @@
                 </div>
             </section>
 
+            <section id="view-returns" class="hidden space-y-4">
+                <div class="custom-card p-4">
+                    <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-arrow-rotate-left text-amber-600"></i> Registro de devoluciones</h3>
+                    <p class="mt-1 text-xs text-slate-500">Las devoluciones no borran ni reemplazan la venta original. Se registran por separado y actualizan el stock o la sección de defectuosos.</p>
+                </div>
+                <div class="custom-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[48rem] text-left text-xs border-collapse">
+                            <thead><tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider"><th class="p-3.5">Fecha / Ticket</th><th class="p-3.5">Cliente</th><th class="p-3.5">Productos</th><th class="p-3.5">Motivo</th><th class="p-3.5">Reintegro</th><th class="p-3.5">Destino</th></tr></thead>
+                            <tbody id="returnsTableBody" class="divide-y divide-bonewhite-border text-slate-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-defectives" class="hidden space-y-4">
+                <div class="custom-card p-4">
+                    <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-red-600"></i> Productos defectuosos</h3>
+                    <p class="mt-1 text-xs text-slate-500">Los artículos en revisión quedan fuera del stock vendible. Al repararlos se reintegran al inventario; al descartarlos permanecen fuera de stock.</p>
+                </div>
+                <div id="defectiveIntakePanel" class="custom-card p-4">
+                    <h4 class="font-bold text-slate-800 text-xs mb-3">Registrar producto defectuoso desde el stock</h4>
+                    <form onsubmit="registerDefectiveProduct(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                        <select id="defectiveItemType" onchange="populateDefectiveItemOptions()" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><option value="acc">Accesorio / producto</option><option value="phone">Celular</option></select>
+                        <select id="defectiveItemSelect" required onchange="updateDefectiveQuantityLimit()" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"></select>
+                        <input id="defectiveQuantity" type="number" min="1" step="1" value="1" required class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs" aria-label="Cantidad defectuosa">
+                        <input id="defectiveReason" required maxlength="250" placeholder="Falla / detalle" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
+                        <button class="bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl p-2.5 text-xs">Enviar a revisión</button>
+                    </form>
+                </div>
+                <div class="custom-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[48rem] text-left text-xs border-collapse">
+                            <thead><tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider"><th class="p-3.5">Fecha / Ticket</th><th class="p-3.5">Producto</th><th class="p-3.5">Cantidad</th><th class="p-3.5">Falla</th><th class="p-3.5">Estado</th><th class="p-3.5 text-center">Acciones</th></tr></thead>
+                            <tbody id="defectivesTableBody" class="divide-y divide-bonewhite-border text-slate-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
             <!-- SECTION 6: PLAN CANJE CALCULATOR & INTAKE -->
             <section id="view-canje-calculator" class="hidden space-y-6">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1144,6 +1193,7 @@
                         <option value="transfer">Transferencia (Mercado Pago)</option>
                         <option value="card">Tarjeta</option>
                         <option value="mixed">Mixto</option>
+                        <option value="account">Cuenta corriente</option>
                     </select>
                 </label>
                 <div id="saleMixedPaymentFields" class="hidden grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1155,6 +1205,58 @@
                 <div class="flex justify-end gap-2 pt-2">
                     <button type="button" onclick="closeSalePaymentModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
                     <button type="submit" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-xs">Guardar medio de pago</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="saleEditModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div><h3 class="font-extrabold text-slate-900">Editar venta realizada</h3><p id="saleEditReference" class="text-[11px] text-slate-500 mt-1"></p></div>
+                <button type="button" onclick="closeSaleEditModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="saveSaleEdit(event)" class="space-y-4">
+                <input id="saleEditId" type="hidden">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label class="text-xs font-bold text-slate-700">Cliente<input id="saleEditCustomerName" required maxlength="120" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
+                    <label class="text-xs font-bold text-slate-700">Teléfono<input id="saleEditCustomerPhone" maxlength="40" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
+                </div>
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between"><h4 class="text-xs font-bold text-slate-700">Productos vendidos</h4><span id="saleEditTotal" class="text-xs font-extrabold text-emerald-700"></span></div>
+                    <div id="saleEditItems" class="space-y-2"></div>
+                    <div class="flex gap-2">
+                        <select id="saleEditAddItem" class="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"></select>
+                        <button type="button" onclick="addSaleEditItem()" class="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar</button>
+                    </div>
+                </div>
+                <label class="block text-xs font-bold text-slate-700">Motivo del cambio<input id="saleEditReason" required maxlength="250" placeholder="Describe brevemente el motivo" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
+                <p class="text-[10px] text-slate-500">El total y los importes del medio de pago se ajustarán con los productos editados. Las unidades devueltas no se pueden quitar de la venta; registrá esas operaciones en Devoluciones.</p>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeSaleEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-xs">Guardar cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="saleReturnModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div><h3 class="font-extrabold text-slate-900">Registrar devolución</h3><p id="saleReturnReference" class="text-[11px] text-slate-500 mt-1"></p></div>
+                <button type="button" onclick="closeSaleReturnModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="processSaleReturn(event)" class="space-y-4">
+                <input id="saleReturnId" type="hidden">
+                <div id="saleReturnItems" class="space-y-2"></div>
+                <label class="block text-xs font-bold text-slate-700">Motivo de devolución<input id="saleReturnReason" required maxlength="250" placeholder="Motivo" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
+                <label class="block text-xs font-bold text-slate-700">Medio de reintegro
+                    <select id="saleReturnMethod" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option>Efectivo</option><option>Transferencia (Mercado Pago)</option><option>Tarjeta</option><option value="Ajuste de cuenta corriente">Ajuste de cuenta corriente</option></select>
+                </label>
+                <div class="flex items-center justify-between border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-700">Total a reintegrar</span><strong id="saleReturnTotal" class="text-sm font-extrabold text-amber-700">$0</strong></div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeSaleReturnModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs">Confirmar devolución</button>
                 </div>
             </form>
         </div>
