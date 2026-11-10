@@ -142,6 +142,8 @@ let IPHONE_TRADE_IN_RATES = [];
         let PRODUCTS = [];
         let PHONES = [];
         let SALES = [];
+        let RETURNS = [];
+        let DEFECTIVES = [];
         let CLIENTS = [];
         let SUPPLIERS = [];
         let PURCHASES = [];
@@ -265,6 +267,8 @@ let IPHONE_TRADE_IN_RATES = [];
             renderCategoriesPage();
             renderClients();
             renderSuppliers();
+            renderReturns();
+            renderDefectives();
             await loadIphoneTradeInRates();
             updateCanjeModelOptions();
             applyRoleAccess();
@@ -283,6 +287,10 @@ let IPHONE_TRADE_IN_RATES = [];
             return isAdmin();
         }
 
+        function canProcessReturns() {
+            return currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'seller';
+        }
+
         function applyRoleAccess() {
             const adminOnlyElements = [
                 document.getElementById('quickProductButton'),
@@ -290,7 +298,9 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('newPhoneButton'),
                 document.getElementById('newCategoryButton'),
                 document.getElementById('intakeUsedPhoneButton'),
-                document.getElementById('nav-suppliers')
+                document.getElementById('nav-suppliers'),
+                document.getElementById('mobile-nav-suppliers'),
+                document.getElementById('defectiveIntakePanel')
             ];
             adminOnlyElements.filter(Boolean).forEach(element => element.classList.toggle('hidden', !isAdmin()));
             const dollarInput = document.getElementById('dailyDollarRate');
@@ -410,7 +420,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
         /* NAVIGATION & TAB SWITCHING */
         function switchTab(tabId) {
-            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients', 'suppliers'];
+            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'returns', 'defectives', 'canje-calculator', 'categories', 'clients', 'suppliers'];
             
             tabs.forEach(t => {
                 const navBtn = document.getElementById(`nav-${t}`);
@@ -434,6 +444,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 'inventory-acc': '<i class="fa-solid fa-boxes-stacked text-brand-accent"></i> Inventario Accesorios & Tech',
                 'inventory-phones': '<i class="fa-solid fa-mobile-screen-button text-purple-600"></i> Stock de Celulares (Nuevos/Usados)',
                 'sales-history': '<i class="fa-solid fa-receipt text-slate-600"></i> Historial de Ventas',
+                'returns': '<i class="fa-solid fa-arrow-rotate-left text-amber-600"></i> Devoluciones',
+                'defectives': '<i class="fa-solid fa-triangle-exclamation text-red-600"></i> Productos defectuosos',
                 'canje-calculator': '<i class="fa-solid fa-arrows-rotate text-emerald-600"></i> Cotizador Plan Canje',
                 'suppliers': '<i class="fa-solid fa-truck-field text-sky-600"></i> Proveedores',
             };
@@ -447,6 +459,11 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderCategoriesPage();
             } else if (tabId === 'clients') {
                 renderClients();
+            } else if (tabId === 'returns') {
+                if (!canProcessReturns()) return switchTab('dashboard');
+                renderReturns();
+            } else if (tabId === 'defectives') {
+                renderDefectives();
             } else if (tabId === 'suppliers') {
                 if (!requireAdmin()) return switchTab('dashboard');
                 renderSuppliers();
@@ -456,8 +473,8 @@ let IPHONE_TRADE_IN_RATES = [];
         /* DASHBOARD RENDERING */
         function renderDashboard() {
             // Calculations
-            let accValue = PRODUCTS.reduce((sum, p) => sum + (p.price * p.stock), 0);
-            let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + p.price, 0);
+            let accValue = PRODUCTS.reduce((sum, p) => sum + ((Number(p.price) || 0) * (Number(p.stock) || 0)), 0);
+            let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + (Number(p.price) || 0), 0);
 
             let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
             let newPhones = inStockPhones.filter(p => p.condition === 'Nuevo').length;
@@ -465,19 +482,21 @@ let IPHONE_TRADE_IN_RATES = [];
 
             let lowStockAcc = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.minStock);
 
-            document.getElementById('dashTotalValue').textContent = `$${accValue.toLocaleString('es-AR')}`;
-            document.getElementById('dashPhoneValue').textContent = `$${phoneValue.toLocaleString('es-AR')}`;
+            document.getElementById('dashTotalValue').textContent = `$${formatMoney(accValue)}`;
+            document.getElementById('dashPhoneValue').textContent = `$${formatMoney(phoneValue)}`;
             document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
             document.getElementById('dashPhonesSub').textContent = `${newPhones} Nuevos / ${usedPhones} Usados`;
             document.getElementById('dashLowStockCount').textContent = `${lowStockAcc.length} ítems`;
 
             // Today's Sales
             const todayStr = new Date().toLocaleDateString('es-AR');
-            const salesToday = SALES.filter(s => s.date.includes(todayStr));
-            const revToday = salesToday.reduce((sum, s) => sum + s.total, 0);
+            const salesToday = SALES.filter(s => s.date?.includes(todayStr));
+            const returnsToday = RETURNS.filter(item => item.dateLabel === todayStr);
+            const revToday = salesToday.reduce((sum, sale) => sum + (Number(sale.total) || 0), 0)
+                - returnsToday.reduce((sum, item) => sum + (Number(item.refundAmount) || 0), 0);
 
             document.getElementById('dashSalesToday').textContent = `${salesToday.length} oper.`;
-            document.getElementById('dashRevenueToday').textContent = `$${revToday.toLocaleString('es-AR')} facturado`;
+            document.getElementById('dashRevenueToday').textContent = `$${formatMoney(revToday)} facturado`;
             renderCashRegister();
 
             // Badges
@@ -516,7 +535,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const recentSales = SALES.slice(0, 6);
             container.innerHTML = recentSales.map(sale => `
                 <button onclick="reprintReceipt('${sale.id}')" class="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left hover:border-brand-400 hover:bg-white transition">
-                    <span class="flex items-center justify-between gap-3"><strong class="text-xs text-slate-900">${sale.id}</strong><strong class="text-xs font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')}</strong></span>
+                    <span class="flex items-center justify-between gap-3"><strong class="text-xs text-slate-900">${sale.id}</strong><strong class="text-xs font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${formatMoney(sale.total)}</strong></span>
                     <span class="mt-1 block truncate text-[11px] text-slate-600">${sale.customerName} · ${sale.items.map(item => `${item.quantity}x ${item.title}`).join(', ')}</span>
                     <span class="mt-1 block text-[10px] text-slate-400">${sale.date}${sale.status === 'Anulada' ? ' · Anulada' : ''}</span>
                 </button>
@@ -562,8 +581,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 : 'Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.';
         }
 
-        function calculateCardCharges(cardAmount) {
-            const planId = document.getElementById('cardPlanSelect').value;
+        function calculateCardChargesForPlan(cardAmount, planId) {
             const phonePlan = PHONE_CARD_PLANS[planId];
             if (phonePlan) {
                 const totalCostRate = phonePlan.provider === 'mp'
@@ -583,6 +601,10 @@ let IPHONE_TRADE_IN_RATES = [];
             const commission = Math.round(cardAmount * plan.rate);
             const vat = planId.startsWith('mp-') ? Math.round(commission * MERCADO_PAGO_VAT_RATE) : 0;
             return { commission, vat, total: commission + vat };
+        }
+
+        function calculateCardCharges(cardAmount) {
+            return calculateCardChargesForPlan(cardAmount, document.getElementById('cardPlanSelect').value);
         }
 
         async function updateDollarRate() {
@@ -654,9 +676,9 @@ let IPHONE_TRADE_IN_RATES = [];
                             </div>` : ''}
                         </div>
                     </td>
-                    <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${item.cost.toLocaleString('es-AR')}</td>
-                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${item.price.toLocaleString('es-AR')}</td>
-                    <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${item.cashPrice.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${formatMoney(item.cost)}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${formatMoney(item.price)}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${formatMoney(item.cashPrice)}</td>
                     <td class="p-3.5 text-center">
                         <div class="flex items-center justify-center gap-2">
                             ${isAdmin() ? `<button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
@@ -678,13 +700,15 @@ let IPHONE_TRADE_IN_RATES = [];
         function renderAccTableTotals(products) {
             const totals = products.reduce((result, product) => ({
                 stock: result.stock + product.stock,
-                cost: result.cost + (product.cost * product.stock),
-                sale: result.sale + (product.price * product.stock)
+                cost: result.cost + ((Number(product.cost) || 0) * (Number(product.stock) || 0)),
+                sale: result.sale + ((Number(product.price) || 0) * (Number(product.stock) || 0))
             }), { stock: 0, cost: 0, sale: 0 });
+            const costComplete = products.every(product => product.cost !== undefined && product.cost !== null && product.cost !== '' && Number.isFinite(Number(product.cost)));
+            const saleComplete = products.every(product => product.price !== undefined && product.price !== null && product.price !== '' && Number.isFinite(Number(product.price)));
             document.getElementById('accTableTotals').innerHTML = `
                 <div><span class="block text-slate-500">Cantidad total</span><strong class="font-mono-num text-sm text-slate-900">${totals.stock} un.</strong></div>
-                <div><span class="block text-slate-500">Valor a costo</span><strong class="font-mono-num text-sm text-slate-900">$${totals.cost.toLocaleString('es-AR')}</strong></div>
-                <div><span class="block text-emerald-700">Valor a precio de lista</span><strong class="font-mono-num text-sm text-emerald-700">$${totals.sale.toLocaleString('es-AR')}</strong></div>
+                <div><span class="block text-slate-500">Valor a costo</span><strong class="font-mono-num text-sm text-slate-900">$${costComplete ? formatMoney(totals.cost) : '—'}</strong></div>
+                <div><span class="block text-emerald-700">Valor a precio de lista</span><strong class="font-mono-num text-sm text-emerald-700">$${saleComplete ? formatMoney(totals.sale) : '—'}</strong></div>
             `;
         }
 
@@ -726,7 +750,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     </td>
                     <td class="p-3.5 font-medium text-slate-700">${item.storage} - ${item.color}</td>
                     <td class="p-3.5 font-mono-num text-xs font-semibold text-slate-600">${item.imei}</td>
-                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${item.price.toLocaleString('es-AR')}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${formatMoney(item.price)}</td>
                     <td class="p-3.5">
                         <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${item.status === 'En Stock' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600'}">
                             ${item.status}
@@ -853,7 +877,7 @@ let IPHONE_TRADE_IN_RATES = [];
                         </div>
                     </div>
                     <div class="pt-2 mt-1 border-t border-bonewhite-border flex items-baseline justify-between">
-                        <span class="text-xs font-extrabold font-mono-num text-slate-900">$${item.price.toLocaleString('es-AR')}</span>
+                        <span class="text-xs font-extrabold font-mono-num text-slate-900">$${formatMoney(item.price)}</span>
                         <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">+ Agregar</span>
                     </div>
                 </div>
@@ -1021,8 +1045,10 @@ let IPHONE_TRADE_IN_RATES = [];
                     <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                         <div class="min-w-0 flex-1">
                             <h4 class="text-xs font-bold text-slate-900 truncate">${item.title}</h4>
-                            <div class="text-[10px] text-slate-500 font-mono-num flex items-center gap-2">
-                                <span>$${item.price.toLocaleString('es-AR')} un.</span>
+                            <div class="text-[10px] text-slate-500 font-mono-num flex items-center gap-2 flex-wrap">
+                                <label class="inline-flex items-center gap-1">$/u
+                                    <input type="number" min="0" step="0.01" value="${item.price}" onchange="updatePOSItemPrice('${item.id}', this.value)" ${isAdmin() ? '' : 'readonly'} class="w-20 rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-800" aria-label="Precio puntual de ${item.title}">
+                                </label>
                                 ${item.imei ? `<span class="bg-slate-200 px-1 rounded text-slate-700">IMEI: ${item.imei}</span>` : ''}
                             </div>
                         </div>
@@ -1047,6 +1073,22 @@ let IPHONE_TRADE_IN_RATES = [];
             calculatePOSTotals();
         }
 
+        function updatePOSItemPrice(id, rawPrice) {
+            if (!requireAdmin()) {
+                renderPOSTicket();
+                return;
+            }
+            const price = Number(rawPrice);
+            const item = posState.ticket.find(ticketItem => ticketItem.id === id);
+            if (!item || !Number.isFinite(price) || price < 0) {
+                showToast('Ingresa un precio válido, mayor o igual a cero.');
+                renderPOSTicket();
+                return;
+            }
+            item.price = price;
+            renderPOSTicket();
+        }
+
         function calculatePOSTotals() {
             let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
@@ -1055,11 +1097,11 @@ let IPHONE_TRADE_IN_RATES = [];
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
-            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (${posState.ticket.some(item => item.type === 'phone') ? 'costo cuotas' : 'cargo por tarjeta'})`;
+            document.getElementById('posSurcharge').textContent = `+$${formatMoney(surcharge)} (${posState.ticket.some(item => item.type === 'phone') ? 'costo cuotas' : 'cargo por tarjeta'})`;
             let finalTotal = Math.max(0, subtotal + surcharge - canjeVal);
 
-            document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
-            document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
+            document.getElementById('posSubtotal').textContent = `$${formatMoney(subtotal)}`;
+            document.getElementById('posTotal').textContent = `$${formatMoney(finalTotal)}`;
         }
 
         function processPOSCheckout() {
@@ -1114,6 +1156,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 cardPlan: posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card'
                     ? (PHONE_CARD_PLANS[document.getElementById('cardPlanSelect').value] || CARD_PLANS[document.getElementById('cardPlanSelect').value])?.label || ''
                     : '',
+                cardPlanId: posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? document.getElementById('cardPlanSelect').value : '',
                 paymentBreakdown: {
                     cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'cash' ? total : 0,
                     transfer: posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'transfer' ? total : 0,
@@ -1164,6 +1207,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     card: sale.paymentBreakdown.card || 0
                 };
             }
+            if (sale.paymentMethod === 'Cuenta corriente') return { cash: 0, transfer: 0, card: 0 };
             if (sale.paymentMethod === 'Tarjeta/Cuotas') return { cash: 0, transfer: 0, card: sale.total };
             return { cash: sale.total, transfer: 0, card: 0 };
         }
@@ -1178,12 +1222,17 @@ let IPHONE_TRADE_IN_RATES = [];
                 result.card += breakdown.card || 0;
                 return result;
             }, { cash: 0, transfer: 0, card: 0 });
+            RETURNS.filter(item => item.dateLabel === today).forEach(item => {
+                if (item.refundMethod === 'Efectivo') totals.cash -= item.refundAmount;
+                else if (item.refundMethod === 'Transferencia (Mercado Pago)') totals.transfer -= item.refundAmount;
+                else if (item.refundMethod === 'Tarjeta') totals.card -= item.refundAmount;
+            });
             const opening = cashRegister.date === today ? cashRegister.openingCash : 0;
             const supplierCash = supplierCashPaidOn(today);
             const sameDay = cashRegister.date === today;
             const openingBank = sameDay ? (cashRegister.openingBank || 0) : 0;
             const openingMp = sameDay ? (cashRegister.openingMp || 0) : 0;
-            const fmt = value => `$${value.toLocaleString('es-AR')}`;
+            const fmt = value => `$${formatMoney(value)}`;
             const status = sameDay && cashRegister.open ? `Abierta con ${fmt(opening)} en efectivo, ${fmt(openingBank)} en bancos y ${fmt(openingMp)} en Mercado Pago` : 'Caja cerrada';
             document.getElementById('cashRegisterStatus').textContent = status;
             document.getElementById('cashRegisterSummary').innerHTML = `
@@ -1222,8 +1271,11 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
             const cashSales = todaySales.reduce((sum, sale) => sum + getSalePaymentBreakdown(sale).cash, 0);
-            const expectedAmount = cashRegister.openingCash + cashSales - supplierCashPaidOn(cashRegisterDate());
-            const expected = `$${expectedAmount.toLocaleString('es-AR')}`;
+            const cashReturns = RETURNS
+                .filter(item => item.dateLabel === cashRegisterDate() && item.refundMethod === 'Efectivo')
+                .reduce((sum, item) => sum + item.refundAmount, 0);
+            const expectedAmount = cashRegister.openingCash + cashSales - cashReturns - supplierCashPaidOn(cashRegisterDate());
+            const expected = `$${formatMoney(expectedAmount)}`;
             const actual = window.prompt(`Efectivo real contado (esperado ${expected}):`, '0');
             if (actual === null) return;
             const actualCash = parseFloat(actual);
@@ -1234,7 +1286,59 @@ let IPHONE_TRADE_IN_RATES = [];
             cashRegister = { ...cashRegister, open: false, closingCash: actualCash, closedAt: new Date().toISOString() };
             await saveLocalState();
             renderCashRegister();
-            showToast(`Caja cerrada. Diferencia: $${(actualCash - expectedAmount).toLocaleString('es-AR')}`);
+            showToast(`Caja cerrada. Diferencia: $${formatMoney(actualCash - expectedAmount)}`);
+        }
+
+        function escapeHTML(value) {
+            return String(value ?? '').replace(/[&<>"']/g, character => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[character]);
+        }
+
+        function formatMoney(value, locale = 'es-AR', options = {}) {
+            if (value === undefined || value === null || value === '') return '—';
+            const amount = Number(value);
+            return Number.isFinite(amount) ? amount.toLocaleString(locale, options) : '—';
+        }
+
+        function returnedQuantityForSaleItem(saleId, saleItem) {
+            return RETURNS.reduce((sum, record) => {
+                if (record.saleId !== saleId) return sum;
+                return sum + record.items.reduce((itemSum, returnedItem) => (
+                    returnedItem.id === saleItem.id && returnedItem.type === saleItem.type
+                        ? itemSum + returnedItem.quantity
+                        : itemSum
+                ), 0);
+            }, 0);
+        }
+
+        function saleHasReturns(saleId) {
+            return RETURNS.some(record => record.saleId === saleId);
+        }
+
+        function hasReturnableItems(sale) {
+            return sale.items.some(item => item.quantity > returnedQuantityForSaleItem(sale.id, item));
+        }
+
+        function calculateSaleReturnAmount(sale, returnedItems) {
+            const previousRefunds = RETURNS.filter(record => record.saleId === sale.id)
+                .reduce((sum, record) => sum + record.refundAmount, 0);
+            const remainingAmount = Math.max(0, sale.total - previousRefunds);
+            const returnQuantities = new Map();
+            returnedItems.forEach(item => {
+                const key = saleItemKey(item);
+                returnQuantities.set(key, (returnQuantities.get(key) || 0) + item.quantity);
+            });
+            const returnsAllRemaining = sale.items.every(item => {
+                const key = saleItemKey(item);
+                const stillAvailable = item.quantity - returnedQuantityForSaleItem(sale.id, item);
+                return (returnQuantities.get(key) || 0) === stillAvailable;
+            });
+            if (returnsAllRemaining) return Math.round(remainingAmount * 100) / 100;
+            const itemValue = returnedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+            const saleValue = Number(sale.subtotal) || 0;
+            const proportionalAmount = saleValue > 0 ? itemValue * (sale.total / saleValue) : 0;
+            return Math.round(Math.min(remainingAmount, proportionalAmount) * 100) / 100;
         }
 
         /* SALES HISTORY TABLE */
@@ -1262,20 +1366,23 @@ let IPHONE_TRADE_IN_RATES = [];
                         </div>
                     </td>
                     <td class="p-3.5 font-semibold text-slate-700">${sale.paymentMethod}</td>
-                    <td class="p-3.5 font-bold font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')} ${sale.status === 'Anulada' ? '<span class="block text-[10px] no-underline">ANULADA</span>' : sale.status === 'Pendiente de emisión' ? '<span class="block text-[10px] text-amber-700 no-underline">PENDIENTE</span>' : sale.paymentMethod === 'Cuenta corriente' ? '<span class="block text-[10px] text-slate-500 no-underline">A CUENTA</span>' : ''}</td>
+                    <td class="p-3.5 font-bold font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${formatMoney(sale.total)} ${sale.status === 'Anulada' ? '<span class="block text-[10px] no-underline">ANULADA</span>' : sale.status === 'Pendiente de emisión' ? '<span class="block text-[10px] text-amber-700 no-underline">PENDIENTE</span>' : sale.paymentMethod === 'Cuenta corriente' ? '<span class="block text-[10px] text-slate-500 no-underline">A CUENTA</span>' : ''}</td>
                     <td class="p-3.5 text-center">
-                        <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
+                        <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver, reimprimir o enviar comprobante" aria-label="Ver, reimprimir o enviar comprobante">
                             <i class="fa-solid fa-receipt"></i>
                         </button>
-                        ${isAdmin() && sale.status === 'Confirmada' && sale.paymentMethod !== 'Cuenta corriente' ? `<button onclick="openSalePaymentModal('${sale.id}')" class="p-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs" title="Modificar medio de pago"><i class="fa-solid fa-money-bill-transfer"></i></button>` : ''}
-                        ${isAdmin() && sale.status !== 'Anulada' ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
-                        ${isAdmin() ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
+                        ${isAdmin() && sale.status === 'Confirmada' ? `<button onclick="openSaleEditModal('${sale.id}')" class="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs" title="Editar cliente o productos"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+                        ${canProcessReturns() && sale.status === 'Confirmada' && hasReturnableItems(sale) ? `<button onclick="openSaleReturnModal('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Registrar devolución"><i class="fa-solid fa-arrow-rotate-left"></i></button>` : ''}
+                        ${isAdmin() && sale.status === 'Confirmada' ? `<button onclick="openSalePaymentModal('${sale.id}')" class="p-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs" title="Modificar medio de pago"><i class="fa-solid fa-money-bill-transfer"></i></button>` : ''}
+                        ${isAdmin() && sale.status !== 'Anulada' && !saleHasReturns(sale.id) ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
+                        ${isAdmin() && !saleHasReturns(sale.id) ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
         }
 
         function getSalePaymentMethodKey(sale) {
+            if (sale.paymentMethod === 'Cuenta corriente') return 'account';
             if (sale.paymentMethod === 'Efectivo') return 'cash';
             if (sale.paymentMethod === 'Transferencia (Mercado Pago)') return 'transfer';
             if (sale.paymentMethod === 'Tarjeta/Cuotas' || sale.paymentMethod === 'Tarjeta') return 'card';
@@ -1286,13 +1393,13 @@ let IPHONE_TRADE_IN_RATES = [];
         function openSalePaymentModal(saleId) {
             if (!requireAdmin()) return;
             const sale = SALES.find(item => item.id === saleId);
-            if (!sale || sale.status !== 'Confirmada' || sale.paymentMethod === 'Cuenta corriente') {
-                showToast('Solo puedes modificar el medio de pago de una venta ya realizada.');
+            if (!sale || sale.status !== 'Confirmada') {
+                showToast('Solo puedes modificar el medio de pago de una venta confirmada.');
                 return;
             }
             const breakdown = getSalePaymentBreakdown(sale);
             document.getElementById('salePaymentId').value = sale.id;
-            document.getElementById('salePaymentReference').textContent = `Ticket ${sale.id} · Total $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
+            document.getElementById('salePaymentReference').textContent = `Ticket ${sale.id} · Total $${formatMoney(sale.total, 'es-AR', { maximumFractionDigits: 2 })}`;
             document.getElementById('salePaymentMethod').value = getSalePaymentMethodKey(sale);
             document.getElementById('saleMixedCash').value = breakdown.cash || 0;
             document.getElementById('saleMixedTransfer').value = breakdown.transfer || 0;
@@ -1306,7 +1413,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const isMixed = document.getElementById('salePaymentMethod').value === 'mixed';
             document.getElementById('saleMixedPaymentFields').classList.toggle('hidden', !isMixed);
             if (sale) {
-                document.getElementById('saleMixedPaymentTotal').textContent = `La suma debe ser igual al total de $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}.`;
+                document.getElementById('saleMixedPaymentTotal').textContent = `La suma debe ser igual al total de $${formatMoney(sale.total, 'es-AR', { maximumFractionDigits: 2 })}.`;
             }
         }
 
@@ -1318,9 +1425,9 @@ let IPHONE_TRADE_IN_RATES = [];
             event.preventDefault();
             if (!requireAdmin()) return;
             const sale = SALES.find(item => item.id === document.getElementById('salePaymentId').value);
-            if (!sale || sale.status !== 'Confirmada' || sale.paymentMethod === 'Cuenta corriente') {
+            if (!sale || sale.status !== 'Confirmada') {
                 closeSalePaymentModal();
-                showToast('Solo puedes modificar el medio de pago de una venta ya realizada.');
+                showToast('Solo puedes modificar el medio de pago de una venta confirmada.');
                 return;
             }
 
@@ -1329,7 +1436,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 cash: 'Efectivo',
                 transfer: 'Transferencia (Mercado Pago)',
                 card: 'Tarjeta',
-                mixed: 'Pago mixto'
+                mixed: 'Pago mixto',
+                account: 'Cuenta corriente'
             };
             if (!Object.prototype.hasOwnProperty.call(methods, method)) {
                 showToast('Selecciona una forma de pago válida.');
@@ -1337,7 +1445,17 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             let paymentBreakdown;
-            if (method === 'mixed') {
+            if (method === 'account') {
+                if (sale.customerName === 'Cliente Mostrador' || !CLIENTS.some(client => client.name.toLowerCase() === sale.customerName.toLowerCase())) {
+                    showToast('Registra o asigna un cliente antes de cambiar la venta a cuenta corriente.');
+                    return;
+                }
+                if (sale.paymentMethod !== 'Cuenta corriente' && saleHasReturns(sale.id)) {
+                    showToast('No se puede cambiar a cuenta corriente una venta que ya tiene devoluciones.');
+                    return;
+                }
+                paymentBreakdown = { cash: 0, transfer: 0, card: 0 };
+            } else if (method === 'mixed') {
                 const cash = parseFloat(document.getElementById('saleMixedCash').value);
                 const transfer = parseFloat(document.getElementById('saleMixedTransfer').value);
                 const card = parseFloat(document.getElementById('saleMixedCard').value);
@@ -1347,7 +1465,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 }
                 const allocatedCents = [cash, transfer, card].reduce((sum, amount) => sum + Math.round(amount * 100), 0);
                 if (allocatedCents !== Math.round(sale.total * 100)) {
-                    showToast(`Los importes del pago mixto deben sumar $${sale.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}.`);
+                    showToast(`Los importes del pago mixto deben sumar $${formatMoney(sale.total, 'es-AR', { maximumFractionDigits: 2 })}.`);
                     return;
                 }
                 paymentBreakdown = { cash, transfer, card };
@@ -1359,19 +1477,688 @@ let IPHONE_TRADE_IN_RATES = [];
                 };
             }
 
+            if (sale.paymentMethod === 'Cuenta corriente' && method !== 'account') {
+                if (saleHasReturns(sale.id)) {
+                    showToast('No se puede cambiar el medio de pago de una venta con devoluciones.');
+                    return;
+                }
+                const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
+                if (!client) {
+                    showToast('No se encontró la cuenta corriente del cliente; no se cambió el medio de pago.');
+                    return;
+                }
+                client.accountBalance = (client.accountBalance || 0) - sale.total;
+            } else if (sale.paymentMethod !== 'Cuenta corriente' && method === 'account') {
+                const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
+                if (client) client.accountBalance = (client.accountBalance || 0) + sale.total;
+            }
             sale.paymentMethod = methods[method];
             sale.paymentBreakdown = paymentBreakdown;
-            await saveLocalState();
+            const synced = await saveLocalState();
             renderSalesTable();
             renderDashboard();
+            renderClients();
             closeSalePaymentModal();
-            showToast('Medio de pago actualizado. El total de la venta no cambió.');
+            showStateSaveToast(synced, 'Medio de pago actualizado. El total de la venta no cambió.');
+        }
+
+        function saleItemKey(item) {
+            return `${item.type}:${item.id}`;
+        }
+
+        function openSaleEditModal(saleId) {
+            if (!requireAdmin()) return;
+            const sale = SALES.find(item => item.id === saleId);
+            if (!sale || sale.status !== 'Confirmada') {
+                showToast('Solo se pueden editar ventas confirmadas.');
+                return;
+            }
+            document.getElementById('saleEditId').value = sale.id;
+            document.getElementById('saleEditReference').textContent = `Ticket ${sale.id} · ${sale.date}`;
+            document.getElementById('saleEditCustomerName').value = sale.customerName;
+            document.getElementById('saleEditCustomerPhone').value = sale.customerPhone === '-' ? '' : sale.customerPhone;
+            document.getElementById('saleEditReason').value = '';
+            renderSaleEditItems(sale.items);
+            populateSaleEditAddOptions(sale.items);
+            document.getElementById('saleEditModal').classList.remove('hidden');
+        }
+
+        function closeSaleEditModal() {
+            document.getElementById('saleEditModal').classList.add('hidden');
+        }
+
+        function renderSaleEditItems(items) {
+            const container = document.getElementById('saleEditItems');
+            container.innerHTML = items.map(item => {
+                const returned = returnedQuantityForSaleItem(document.getElementById('saleEditId').value, item);
+                const minimum = returned;
+                const unitPrice = Number(item.price) || 0;
+                return `<div data-sale-edit-row data-id="${escapeHTML(item.id)}" data-type="${escapeHTML(item.type)}" data-price="${unitPrice}" data-title="${escapeHTML(item.title)}" data-cash-price="${Number(item.cashPrice) || unitPrice}" data-imei="${escapeHTML(item.imei || '')}" class="grid grid-cols-[minmax(0,1fr)_5.5rem_2rem] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                    <div class="min-w-0"><span class="block truncate text-xs font-semibold text-slate-800">${escapeHTML(item.title)}</span><span class="text-[10px] text-slate-500">$${formatMoney(unitPrice)} c/u${returned ? ` · ${returned} devuelta(s)` : ''}</span></div>
+                    <input data-quantity type="number" min="${minimum}" max="${item.type === 'phone' ? 1 : ''}" step="1" value="${item.quantity}" onchange="updateSaleEditTotal()" class="w-full rounded-lg border border-slate-200 bg-white p-2 text-center text-xs" aria-label="Cantidad de ${escapeHTML(item.title)}">
+                    <button type="button" onclick="removeSaleEditItem(this)" class="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Quitar producto" title="${returned ? 'No se pueden quitar unidades ya devueltas' : 'Quitar producto'}"><i class="fa-solid fa-xmark"></i></button>
+                </div>`;
+            }).join('') || '<p class="rounded-xl bg-slate-50 p-3 text-center text-xs text-slate-500">Agregá al menos un producto a la venta.</p>';
+            updateSaleEditTotal();
+        }
+
+        function populateSaleEditAddOptions(items) {
+            const select = document.getElementById('saleEditAddItem');
+            const existing = new Set(items.map(saleItemKey));
+            const options = [];
+            PRODUCTS.filter(item => item.stock > 0 && item.status !== 'Anulado' && !existing.has(`acc:${item.id}`))
+                .forEach(item => options.push({ value: `acc|${item.id}`, label: `${item.title} · $${formatMoney(item.price)}` }));
+            PHONES.filter(item => item.status === 'En Stock' && !existing.has(`phone:${item.id}`))
+                .forEach(item => options.push({ value: `phone|${item.id}`, label: `${item.brand} ${item.model} ${item.storage} · $${formatMoney(item.price)}` }));
+            select.innerHTML = options.map(option => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`).join('');
+            select.disabled = options.length === 0;
+            if (!options.length) select.innerHTML = '<option value="">No hay productos disponibles para agregar</option>';
+        }
+
+        function addSaleEditItem() {
+            if (!requireAdmin()) return;
+            const value = document.getElementById('saleEditAddItem').value;
+            if (!value) return;
+            const [type, id] = value.split('|');
+            let item;
+            if (type === 'acc') {
+                const product = PRODUCTS.find(productItem => productItem.id === id);
+                if (product) item = { id, title: product.title, price: product.price, cashPrice: product.cashPrice, quantity: 1, type };
+            } else if (type === 'phone') {
+                const phone = PHONES.find(phoneItem => phoneItem.id === id);
+                if (phone) item = { id, title: `${phone.brand} ${phone.model} ${phone.storage} (${phone.condition})`, price: phone.price, cashPrice: phone.price, quantity: 1, type, imei: phone.imei };
+            }
+            if (!item) {
+                showToast('El producto seleccionado ya no está disponible.');
+                return;
+            }
+            const items = [...document.querySelectorAll('#saleEditItems [data-sale-edit-row]')].map(row => ({
+                id: row.dataset.id,
+                type: row.dataset.type,
+                title: row.dataset.title,
+                price: Number(row.dataset.price),
+                cashPrice: Number(row.dataset.cashPrice),
+                imei: row.dataset.imei || null,
+                quantity: Number(row.querySelector('[data-quantity]').value)
+            }));
+            const existing = items.find(row => row.id === item.id && row.type === item.type);
+            if (existing) existing.quantity += 1;
+            else items.push(item);
+            renderSaleEditItems(items);
+            populateSaleEditAddOptions(items);
+        }
+
+        function removeSaleEditItem(button) {
+            const row = button.closest('[data-sale-edit-row]');
+            const item = { id: row.dataset.id, type: row.dataset.type };
+            const returned = returnedQuantityForSaleItem(document.getElementById('saleEditId').value, item);
+            const quantity = Number(row.querySelector('[data-quantity]').value);
+            if (returned > 0 || quantity <= returned) {
+                showToast('No se pueden quitar unidades que ya fueron devueltas.');
+                return;
+            }
+            row.remove();
+            updateSaleEditTotal();
+        }
+
+        function updateSaleEditTotal() {
+            const sale = SALES.find(item => item.id === document.getElementById('saleEditId').value);
+            if (!sale) return;
+            const subtotal = [...document.querySelectorAll('#saleEditItems [data-sale-edit-row]')].reduce((sum, row) => {
+                const quantity = Math.max(0, Number(row.querySelector('[data-quantity]').value) || 0);
+                return sum + quantity * Number(row.dataset.price);
+            }, 0);
+            const totals = calculateSaleEditTotals(sale, subtotal);
+            document.getElementById('saleEditTotal').textContent = `Total nuevo: $${formatMoney(totals.total, 'es-AR', { maximumFractionDigits: 2 })}`;
+        }
+
+        function saleCardPlanId(sale) {
+            const plans = sale.items.some(item => item.type === 'phone') ? PHONE_CARD_PLANS : CARD_PLANS;
+            if (sale.cardPlanId && plans[sale.cardPlanId]) return sale.cardPlanId;
+            return Object.entries(plans).find(([, plan]) => plan.label === sale.cardPlan)?.[0] || '';
+        }
+
+        function calculateSaleEditTotals(sale, subtotal) {
+            const net = Math.max(0, subtotal - (sale.canjeDeduction || 0));
+            let surcharge = 0;
+            let commission = 0;
+            let vat = 0;
+            if (sale.paymentMethod === 'Tarjeta' || sale.paymentMethod === 'Tarjeta/Cuotas' || sale.paymentMethod === 'Pago mixto') {
+                const planId = saleCardPlanId(sale);
+                if (!planId) {
+                    surcharge = sale.surcharge || 0;
+                    commission = sale.cardCommission || 0;
+                    vat = sale.cardCommissionVat || 0;
+                } else {
+                    let cardBase = net;
+                    if (sale.paymentMethod === 'Pago mixto') {
+                        const previous = getSalePaymentBreakdown(sale);
+                        const previousCardBase = Math.max(0, previous.card - (sale.surcharge || 0));
+                        const previousNet = previous.cash + previous.transfer + previousCardBase;
+                        cardBase = previousNet > 0 ? net * previousCardBase / previousNet : 0;
+                    }
+                    const charges = calculateCardChargesForPlan(cardBase, planId);
+                    surcharge = charges.total;
+                    commission = charges.commission;
+                    vat = charges.vat;
+                }
+            }
+            return { net, surcharge, commission, vat, total: net + surcharge };
+        }
+
+        function adjustedPaymentBreakdown(sale, newNet, newTotal, newSurcharge) {
+            if (sale.paymentMethod === 'Cuenta corriente') return { cash: 0, transfer: 0, card: 0 };
+            if (sale.paymentMethod === 'Pago mixto') {
+                const previous = getSalePaymentBreakdown(sale);
+                const previousCardBase = Math.max(0, previous.card - (sale.surcharge || 0));
+                const previousNet = previous.cash + previous.transfer + previousCardBase;
+                const netCents = Math.round(newNet * 100);
+                if (previousNet <= 0) return { cash: netCents / 100, transfer: 0, card: newSurcharge };
+                const cash = Math.round(netCents * previous.cash / previousNet) / 100;
+                const transfer = Math.round(netCents * previous.transfer / previousNet) / 100;
+                const cardBase = (netCents - Math.round(cash * 100) - Math.round(transfer * 100)) / 100;
+                return { cash, transfer, card: cardBase + newSurcharge };
+            }
+            return {
+                cash: sale.paymentMethod === 'Efectivo' ? newTotal : 0,
+                transfer: sale.paymentMethod === 'Transferencia (Mercado Pago)' ? newTotal : 0,
+                card: sale.paymentMethod === 'Tarjeta' || sale.paymentMethod === 'Tarjeta/Cuotas' ? newTotal : 0
+            };
+        }
+
+        function accountReturnAmount(sale) {
+            return RETURNS.filter(record => record.saleId === sale.id && record.refundMethod === 'Ajuste de cuenta corriente')
+                .reduce((sum, record) => sum + record.refundAmount, 0);
+        }
+
+        async function saveSaleEdit(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+            const sale = SALES.find(item => item.id === document.getElementById('saleEditId').value);
+            const reason = document.getElementById('saleEditReason').value.trim();
+            if (!sale || sale.status !== 'Confirmada' || !reason) {
+                showToast('La venta debe estar confirmada e indicar el motivo de edición.');
+                return;
+            }
+            const rows = [...document.querySelectorAll('#saleEditItems [data-sale-edit-row]')];
+            if (!rows.length) {
+                showToast('La venta debe conservar al menos un producto.');
+                return;
+            }
+            const nextItems = [];
+            const nextQuantities = new Map();
+            for (const row of rows) {
+                const item = {
+                    id: row.dataset.id,
+                    type: row.dataset.type,
+                    title: row.dataset.title,
+                    price: Number(row.dataset.price),
+                    cashPrice: Number(row.dataset.cashPrice),
+                    imei: row.dataset.imei || null,
+                    quantity: Number(row.querySelector('[data-quantity]').value)
+                };
+                if (!Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.price) || item.price < 0) {
+                    showToast('Revisa las cantidades y precios de los productos.');
+                    return;
+                }
+                const returned = returnedQuantityForSaleItem(sale.id, item);
+                if (item.quantity < returned) {
+                    showToast('La cantidad no puede ser menor a las unidades ya devueltas.');
+                    return;
+                }
+                const key = saleItemKey(item);
+                nextQuantities.set(key, (nextQuantities.get(key) || 0) + item.quantity);
+                const duplicate = nextItems.find(existing => saleItemKey(existing) === key);
+                if (duplicate) duplicate.quantity += item.quantity;
+                else nextItems.push(item);
+            }
+            if (nextItems.some(item => item.type === 'phone' && item.quantity !== 1)) {
+                showToast('Cada celular es una unidad única.');
+                return;
+            }
+            const oldQuantities = new Map();
+            sale.items.forEach(item => oldQuantities.set(saleItemKey(item), (oldQuantities.get(saleItemKey(item)) || 0) + item.quantity));
+            for (const key of new Set([...oldQuantities.keys(), ...nextQuantities.keys()])) {
+                const [type, id] = key.split(':');
+                const returned = RETURNS.filter(record => record.saleId === sale.id)
+                    .flatMap(record => record.items)
+                    .filter(item => item.type === type && item.id === id)
+                    .reduce((sum, item) => sum + item.quantity, 0);
+                const newQuantity = nextQuantities.get(key) || 0;
+                if (newQuantity < returned) {
+                    showToast('La cantidad no puede ser menor a las unidades ya devueltas.');
+                    return;
+                }
+            }
+            const stockChanges = [];
+            for (const key of new Set([...oldQuantities.keys(), ...nextQuantities.keys()])) {
+                const [type, id] = key.split(':');
+                const delta = (nextQuantities.get(key) || 0) - (oldQuantities.get(key) || 0);
+                if (!delta) continue;
+                if (type === 'acc') {
+                    const product = PRODUCTS.find(item => item.id === id);
+                    if (!product || (delta > 0 && product.stock < delta)) {
+                        showToast(`No hay stock suficiente para agregar ${nextItems.find(item => item.id === id)?.title || 'el producto'}.`);
+                        return;
+                    }
+                    stockChanges.push({ type, item: product, delta });
+                } else {
+                    const phone = PHONES.find(item => item.id === id);
+                    if (!phone || (delta > 0 && (phone.status !== 'En Stock' || delta !== 1))) {
+                        showToast('El celular que quieres agregar ya no está disponible.');
+                        return;
+                    }
+                    stockChanges.push({ type, item: phone, delta });
+                }
+            }
+            const customerName = document.getElementById('saleEditCustomerName').value.trim();
+            const customerPhone = document.getElementById('saleEditCustomerPhone').value.trim() || '-';
+            if (sale.paymentMethod === 'Cuenta corriente' && customerName === 'Cliente Mostrador') {
+                showToast('Una venta en cuenta corriente debe conservar un cliente identificado.');
+                return;
+            }
+            const oldCustomerName = sale.customerName;
+            const oldCustomerPhone = sale.customerPhone;
+            const oldItems = sale.items.map(item => ({ ...item }));
+            const oldTotal = sale.total;
+            const oldSubtotal = sale.subtotal;
+            const oldSurcharge = sale.surcharge || 0;
+            const oldClient = CLIENTS.find(client => client.name.toLowerCase() === oldCustomerName.toLowerCase());
+            const newSubtotal = nextItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            const newTotals = calculateSaleEditTotals(sale, newSubtotal);
+            const newTotal = newTotals.total;
+            const previousRefunds = RETURNS.filter(record => record.saleId === sale.id).reduce((sum, record) => sum + record.refundAmount, 0);
+            if (newTotal < previousRefunds) {
+                showToast('El total editado no puede quedar por debajo de los reintegros ya realizados.');
+                return;
+            }
+            const paymentBreakdown = adjustedPaymentBreakdown(sale, newTotals.net, newTotal, newTotals.surcharge);
+            let newClient = customerName === 'Cliente Mostrador' ? null : CLIENTS.find(client => client.name.toLowerCase() === customerName.toLowerCase()) || null;
+            if (customerName !== 'Cliente Mostrador' && !newClient) {
+                newClient = { id: `CLI-${Date.now()}`, name: customerName, phone: customerPhone === '-' ? '' : customerPhone, email: '', purchaseCount: 0, accountBalance: 0 };
+                CLIENTS.push(newClient);
+            }
+            if (sale.paymentMethod === 'Cuenta corriente' && !newClient) {
+                showToast('No se pudo asociar el nuevo cliente a una cuenta corriente.');
+                return;
+            }
+            stockChanges.forEach(change => {
+                if (change.type === 'acc') {
+                    change.item.stock -= change.delta;
+                    if (change.delta < 0 && change.item.status === 'Anulado') change.item.status = 'Activo';
+                }
+                else change.item.status = change.delta > 0 ? 'Vendido' : 'En Stock';
+            });
+            if (oldClient !== newClient) {
+                if (oldClient) {
+                    oldClient.purchaseCount = Math.max(0, (oldClient.purchaseCount || 0) - 1);
+                    if (sale.paymentMethod === 'Cuenta corriente') oldClient.accountBalance = (oldClient.accountBalance || 0) - Math.max(0, oldTotal - accountReturnAmount(sale));
+                }
+                if (customerName !== 'Cliente Mostrador') {
+                    newClient.purchaseCount = (newClient.purchaseCount || 0) + 1;
+                    newClient.phone = customerPhone === '-' ? '' : customerPhone;
+                    if (sale.paymentMethod === 'Cuenta corriente') newClient.accountBalance = (newClient.accountBalance || 0) + Math.max(0, newTotal - accountReturnAmount(sale));
+                }
+            } else if (newClient) {
+                newClient.phone = customerPhone === '-' ? '' : customerPhone;
+                if (sale.paymentMethod === 'Cuenta corriente') newClient.accountBalance = (newClient.accountBalance || 0) + newTotal - oldTotal;
+            }
+            sale.customerName = customerName;
+            sale.customerPhone = customerPhone;
+            sale.items = nextItems;
+            sale.subtotal = newSubtotal;
+            sale.surcharge = newTotals.surcharge;
+            sale.cardCommission = newTotals.commission;
+            sale.cardCommissionVat = newTotals.vat;
+            sale.total = newTotal;
+            sale.paymentBreakdown = paymentBreakdown;
+            sale.editHistory = [...(sale.editHistory || []), {
+                date: new Date().toISOString(),
+                user: currentUserProfile?.nick || 'Usuario',
+                reason,
+                customerName: { from: oldCustomerName, to: customerName },
+                customerPhone: { from: oldCustomerPhone, to: customerPhone },
+                subtotal: { from: oldSubtotal, to: newSubtotal },
+                surcharge: { from: oldSurcharge, to: newTotals.surcharge },
+                total: { from: oldTotal, to: newTotal },
+                items: oldItems
+            }];
+            const synced = await saveLocalState();
+            closeSaleEditModal();
+            renderSalesTable();
+            renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            renderClients();
+            renderCashRegister();
+            showStateSaveToast(synced, 'Venta actualizada. El cambio quedó registrado en su historial.');
+        }
+
+        function openSaleReturnModal(saleId) {
+            if (!canProcessReturns()) {
+                showToast('No tienes permiso para procesar devoluciones.');
+                return;
+            }
+            const sale = SALES.find(item => item.id === saleId);
+            if (!sale || sale.status !== 'Confirmada' || !hasReturnableItems(sale)) {
+                showToast('Esta venta no tiene unidades disponibles para devolver.');
+                return;
+            }
+            document.getElementById('saleReturnId').value = sale.id;
+            document.getElementById('saleReturnReference').textContent = `Ticket ${sale.id} · ${sale.customerName}`;
+            document.getElementById('saleReturnReason').value = '';
+            const method = sale.paymentMethod === 'Efectivo' || sale.paymentMethod === 'Transferencia (Mercado Pago)' || sale.paymentMethod === 'Tarjeta'
+                ? sale.paymentMethod
+                : sale.paymentMethod === 'Cuenta corriente' ? 'Ajuste de cuenta corriente' : 'Efectivo';
+            const select = document.getElementById('saleReturnMethod');
+            select.querySelector('option[value="Ajuste de cuenta corriente"]').disabled = sale.paymentMethod !== 'Cuenta corriente';
+            select.value = method;
+            if (method !== 'Ajuste de cuenta corriente') select.value = method;
+            document.getElementById('saleReturnItems').innerHTML = sale.items.map((item, index) => {
+                const returned = returnedQuantityForSaleItem(sale.id, item);
+                const remaining = item.quantity - returned;
+                if (remaining <= 0) return '';
+                return `<div data-sale-return-row data-index="${index}" data-id="${escapeHTML(item.id)}" data-type="${escapeHTML(item.type)}" data-title="${escapeHTML(item.title)}" data-price="${Number(item.price) || 0}" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_5rem_minmax(9rem,12rem)] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                    <div class="min-w-0"><span class="block truncate text-xs font-semibold text-slate-800">${escapeHTML(item.title)}</span><span class="text-[10px] text-slate-500">Devueltas: ${returned} · Disponibles: ${remaining} · $${formatMoney(item.price)} c/u</span></div>
+                    <input data-return-quantity type="number" min="0" max="${remaining}" step="1" value="0" oninput="updateSaleReturnTotal()" class="w-full rounded-lg border border-slate-200 bg-white p-2 text-center text-xs" aria-label="Cantidad a devolver de ${escapeHTML(item.title)}">
+                    <select data-return-disposition class="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs"><option value="stock">Reintegrar al stock</option><option value="defective">Enviar a defectuosos</option></select>
+                </div>`;
+            }).join('') || '<p class="rounded-xl bg-slate-50 p-3 text-center text-xs text-slate-500">No quedan unidades pendientes de devolución.</p>';
+            updateSaleReturnTotal();
+            document.getElementById('saleReturnModal').classList.remove('hidden');
+        }
+
+        function closeSaleReturnModal() {
+            document.getElementById('saleReturnModal').classList.add('hidden');
+        }
+
+        function updateSaleReturnTotal() {
+            const sale = SALES.find(item => item.id === document.getElementById('saleReturnId').value);
+            if (!sale) return;
+            const items = [...document.querySelectorAll('#saleReturnItems [data-sale-return-row]')].map(row => ({
+                id: row.dataset.id,
+                type: row.dataset.type,
+                unitPrice: Number(row.dataset.price),
+                quantity: Math.max(0, Number(row.querySelector('[data-return-quantity]').value) || 0)
+            })).filter(item => item.quantity > 0);
+            const total = calculateSaleReturnAmount(sale, items);
+            document.getElementById('saleReturnTotal').textContent = `$${formatMoney(total, 'es-AR', { maximumFractionDigits: 2 })}`;
+        }
+
+        async function processSaleReturn(event) {
+            event.preventDefault();
+            if (!canProcessReturns()) {
+                showToast('No tienes permiso para procesar devoluciones.');
+                return;
+            }
+            const sale = SALES.find(item => item.id === document.getElementById('saleReturnId').value);
+            const reason = document.getElementById('saleReturnReason').value.trim();
+            if (!sale || sale.status !== 'Confirmada' || !reason) {
+                showToast('La venta debe estar confirmada e indicar el motivo de la devolución.');
+                return;
+            }
+            const returnedItems = [];
+            const stockUpdates = [];
+            for (const row of document.querySelectorAll('#saleReturnItems [data-sale-return-row]')) {
+                const quantity = Number(row.querySelector('[data-return-quantity]').value);
+                if (!Number.isInteger(quantity) || quantity < 0) {
+                    showToast('Ingresa cantidades enteras válidas para devolver.');
+                    return;
+                }
+                if (!quantity) continue;
+                const saleItem = sale.items.find(item => item.id === row.dataset.id && item.type === row.dataset.type);
+                const alreadyReturned = saleItem ? returnedQuantityForSaleItem(sale.id, saleItem) : 0;
+                if (!saleItem || quantity > saleItem.quantity - alreadyReturned) {
+                    showToast('La cantidad supera las unidades todavía disponibles para devolución.');
+                    return;
+                }
+                const item = row.dataset.type === 'acc'
+                    ? PRODUCTS.find(product => product.id === row.dataset.id)
+                    : PHONES.find(phone => phone.id === row.dataset.id);
+                if (!item) {
+                    showToast(`No se encontró ${row.dataset.title} en el inventario; no se registró la devolución.`);
+                    return;
+                }
+                const disposition = row.querySelector('[data-return-disposition]').value;
+                if (disposition === 'stock') stockUpdates.push({ item, type: row.dataset.type, quantity });
+                returnedItems.push({
+                    id: row.dataset.id,
+                    type: row.dataset.type,
+                    title: row.dataset.title,
+                    quantity,
+                    unitPrice: Number(row.dataset.price),
+                    disposition
+                });
+            }
+            if (!returnedItems.length) {
+                showToast('Selecciona al menos un producto para devolver.');
+                return;
+            }
+            const refundMethod = document.getElementById('saleReturnMethod').value;
+            const allowedMethods = ['Efectivo', 'Transferencia (Mercado Pago)', 'Tarjeta', 'Ajuste de cuenta corriente'];
+            if (!allowedMethods.includes(refundMethod) || (refundMethod === 'Ajuste de cuenta corriente' && sale.paymentMethod !== 'Cuenta corriente')) {
+                showToast('Selecciona un medio de reintegro válido.');
+                return;
+            }
+            const refundAmount = calculateSaleReturnAmount(sale, returnedItems);
+            const accountClient = refundMethod === 'Ajuste de cuenta corriente'
+                ? CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase())
+                : null;
+            if (refundMethod === 'Ajuste de cuenta corriente' && !accountClient) {
+                showToast('No se encontró la cuenta corriente del cliente; no se registró la devolución.');
+                return;
+            }
+            stockUpdates.forEach(update => {
+                if (update.type === 'acc') {
+                    update.item.stock += update.quantity;
+                    if (update.item.status === 'Anulado') update.item.status = 'Activo';
+                }
+                else update.item.status = 'En Stock';
+            });
+            const returnRecord = {
+                id: `DEV-${Date.now()}-${RETURNS.length}`,
+                saleId: sale.id,
+                date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
+                dateLabel: new Date().toLocaleDateString('es-AR'),
+                customerName: sale.customerName,
+                items: returnedItems,
+                reason,
+                refundMethod,
+                refundAmount,
+                user: currentUserProfile?.nick || 'Usuario'
+            };
+            RETURNS.unshift(returnRecord);
+            returnedItems.filter(item => item.disposition === 'defective').forEach(item => {
+                const record = {
+                    id: `DEF-${Date.now()}-${DEFECTIVES.length}`,
+                    itemId: item.id,
+                    type: item.type,
+                    title: item.title,
+                    quantity: item.quantity,
+                    reason,
+                    saleId: sale.id,
+                    date: returnRecord.date,
+                    status: 'En revisión',
+                    source: 'Devolución de cliente',
+                    user: returnRecord.user
+                };
+                DEFECTIVES.unshift(record);
+                if (item.type === 'phone') {
+                    const phone = PHONES.find(phoneItem => phoneItem.id === item.id);
+                    if (phone) phone.status = 'Defectuoso';
+                }
+            });
+            if (refundMethod === 'Ajuste de cuenta corriente') {
+                accountClient.accountBalance = (accountClient.accountBalance || 0) - refundAmount;
+            }
+            const synced = await saveLocalState();
+            closeSaleReturnModal();
+            renderSalesTable();
+            renderReturns();
+            renderDefectives();
+            renderDashboard();
+            renderCashRegister();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            renderClients();
+            showStateSaveToast(synced, `Devolución registrada por $${formatMoney(refundAmount)}.`);
+        }
+
+        function renderReturns() {
+            const body = document.getElementById('returnsTableBody');
+            if (!body) return;
+            body.innerHTML = RETURNS.map(record => `
+                <tr>
+                    <td class="p-3.5"><span class="block font-semibold text-slate-800">${escapeHTML(record.date)}</span><span class="text-[10px] text-slate-500">${escapeHTML(record.saleId)}</span></td>
+                    <td class="p-3.5">${escapeHTML(record.customerName)}</td>
+                    <td class="p-3.5">${record.items.map(item => `<div>${item.quantity}x ${escapeHTML(item.title)}</div>`).join('')}</td>
+                    <td class="p-3.5">${escapeHTML(record.reason)}</td>
+                    <td class="p-3.5"><span class="block font-bold text-amber-700">$${formatMoney(record.refundAmount)}</span><span class="text-[10px] text-slate-500">${escapeHTML(record.refundMethod)}</span></td>
+                    <td class="p-3.5">${record.items.map(item => `<div>${item.disposition === 'defective' ? 'Defectuosos' : 'Stock vendible'}</div>`).join('')}</td>
+                </tr>`).join('') || '<tr><td colspan="6" class="p-8 text-center text-slate-400">Todavía no hay devoluciones registradas.</td></tr>';
+        }
+
+        function populateDefectiveItemOptions() {
+            const type = document.getElementById('defectiveItemType').value;
+            const select = document.getElementById('defectiveItemSelect');
+            const quantityInput = document.getElementById('defectiveQuantity');
+            if (type === 'acc') {
+                const available = PRODUCTS.filter(item => item.stock > 0 && item.status !== 'Anulado');
+                select.innerHTML = available.map(item => `<option value="${escapeHTML(item.id)}" data-stock="${item.stock}">${escapeHTML(item.title)} · ${item.stock} en stock</option>`).join('');
+                select.disabled = !available.length;
+                quantityInput.max = available[0]?.stock || 1;
+                quantityInput.readOnly = false;
+                if (!available.length) select.innerHTML = '<option value="">No hay productos disponibles</option>';
+            } else {
+                const available = PHONES.filter(item => item.status === 'En Stock');
+                select.innerHTML = available.map(item => `<option value="${escapeHTML(item.id)}" data-stock="1">${escapeHTML(`${item.brand} ${item.model} ${item.storage} (${item.imei})`)}</option>`).join('');
+                select.disabled = !available.length;
+                quantityInput.value = 1;
+                quantityInput.max = 1;
+                quantityInput.readOnly = true;
+                if (!available.length) select.innerHTML = '<option value="">No hay celulares disponibles</option>';
+            }
+        }
+
+        function updateDefectiveQuantityLimit() {
+            if (document.getElementById('defectiveItemType').value !== 'acc') return;
+            const select = document.getElementById('defectiveItemSelect');
+            const quantityInput = document.getElementById('defectiveQuantity');
+            const selected = select.options[select.selectedIndex];
+            const max = Number(selected?.dataset.stock) || 1;
+            quantityInput.max = max;
+            if (Number(quantityInput.value) > max) quantityInput.value = max;
+        }
+
+        function renderDefectives() {
+            const body = document.getElementById('defectivesTableBody');
+            if (!body) return;
+            populateDefectiveItemOptions();
+            body.innerHTML = DEFECTIVES.map(record => `
+                <tr>
+                    <td class="p-3.5"><span class="block font-semibold text-slate-800">${escapeHTML(record.date)}</span><span class="text-[10px] text-slate-500">${escapeHTML(record.saleId || record.source)}</span></td>
+                    <td class="p-3.5">${escapeHTML(record.title)}</td>
+                    <td class="p-3.5">${record.quantity}</td>
+                    <td class="p-3.5">${escapeHTML(record.reason)}</td>
+                    <td class="p-3.5"><span class="rounded-full px-2 py-1 text-[10px] font-bold ${record.status === 'En revisión' ? 'bg-amber-100 text-amber-800' : record.status === 'Reintegrado' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">${escapeHTML(record.status)}</span></td>
+                    <td class="p-3.5 text-center whitespace-nowrap">${isAdmin() && record.status === 'En revisión' ? `<button onclick="resolveDefectiveProduct('${record.id}', 'repair')" class="rounded-lg bg-emerald-50 p-1.5 text-emerald-700 hover:bg-emerald-100" title="Reparado: reintegrar al stock"><i class="fa-solid fa-screwdriver-wrench"></i></button><button onclick="resolveDefectiveProduct('${record.id}', 'discard')" class="ml-1 rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200" title="Descartar"><i class="fa-solid fa-trash"></i></button>` : ''}</td>
+                </tr>`).join('') || '<tr><td colspan="6" class="p-8 text-center text-slate-400">No hay productos defectuosos registrados.</td></tr>';
+        }
+
+        async function registerDefectiveProduct(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+            const type = document.getElementById('defectiveItemType').value;
+            const itemId = document.getElementById('defectiveItemSelect').value;
+            const quantity = Number(document.getElementById('defectiveQuantity').value);
+            const reason = document.getElementById('defectiveReason').value.trim();
+            if (!Number.isInteger(quantity) || quantity < 1 || !reason) {
+                showToast('Ingresa una cantidad entera y detalla la falla.');
+                return;
+            }
+            const item = type === 'acc'
+                ? PRODUCTS.find(product => product.id === itemId)
+                : PHONES.find(phone => phone.id === itemId);
+            if (!item || (type === 'acc' && (item.stock < quantity || item.status === 'Anulado')) || (type === 'phone' && (item.status !== 'En Stock' || quantity !== 1))) {
+                showToast('El artículo ya no tiene disponibilidad suficiente para enviarlo a revisión.');
+                return;
+            }
+            if (type === 'acc') item.stock -= quantity;
+            else item.status = 'Defectuoso';
+            const title = type === 'acc' ? item.title : `${item.brand} ${item.model} ${item.storage} (${item.imei})`;
+            DEFECTIVES.unshift({
+                id: `DEF-${Date.now()}`,
+                itemId,
+                type,
+                title,
+                quantity,
+                reason,
+                date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
+                status: 'En revisión',
+                source: 'Control de stock',
+                user: currentUserProfile?.nick || 'Usuario'
+            });
+            const synced = await saveLocalState();
+            event.target.reset();
+            document.getElementById('defectiveQuantity').value = 1;
+            renderDefectives();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            renderDashboard();
+            showStateSaveToast(synced, 'Producto separado del stock vendible y enviado a revisión.');
+        }
+
+        async function resolveDefectiveProduct(recordId, resolution) {
+            if (!requireAdmin()) return;
+            const record = DEFECTIVES.find(item => item.id === recordId && item.status === 'En revisión');
+            if (!record || !['repair', 'discard'].includes(resolution)) return;
+            if (resolution === 'repair') {
+                if (record.type === 'acc') {
+                    const product = PRODUCTS.find(item => item.id === record.itemId);
+                    if (!product) {
+                        showToast('No se encontró el producto en el inventario; no se cambió su estado.');
+                        return;
+                    }
+                    product.stock += record.quantity;
+                    if (product.status === 'Anulado') product.status = 'Activo';
+                } else {
+                    const phone = PHONES.find(item => item.id === record.itemId);
+                    if (!phone) {
+                        showToast('No se encontró el celular en el inventario; no se cambió su estado.');
+                        return;
+                    }
+                    phone.status = 'En Stock';
+                }
+                record.status = 'Reintegrado';
+            } else {
+                if (record.type === 'phone') {
+                    const phone = PHONES.find(item => item.id === record.itemId);
+                    if (phone) phone.status = 'Descartado';
+                }
+                record.status = 'Descartado';
+            }
+            record.resolvedAt = new Date().toISOString();
+            record.resolvedBy = currentUserProfile?.nick || 'Usuario';
+            const synced = await saveLocalState();
+            renderDefectives();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
+            renderDashboard();
+            showStateSaveToast(synced, record.status === 'Reintegrado' ? 'Producto reparado y reintegrado al stock.' : 'Producto marcado como descartado.');
         }
 
         async function cancelSale(saleId) {
             if (!requireAdmin()) return;
             const sale = SALES.find(item => item.id === saleId);
             if (!sale || sale.status === 'Anulada') return;
+            if (saleHasReturns(sale.id)) {
+                showToast('No se puede anular una venta con devoluciones; conserva su historial de movimientos.');
+                return;
+            }
             if (sale.status === 'Pendiente de emisión') {
                 pendingSaleId = sale.id;
                 await cancelPendingSale();
@@ -1402,6 +2189,10 @@ let IPHONE_TRADE_IN_RATES = [];
 
         async function deleteSale(saleId) {
             if (!requireAdmin()) return;
+            if (saleHasReturns(saleId)) {
+                showToast('No se puede eliminar una venta con devoluciones registradas.');
+                return;
+            }
             SALES = SALES.filter(item => item.id !== saleId);
             await saveLocalState();
             renderSalesTable();
@@ -1430,18 +2221,17 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
                 <div class="flex justify-between text-slate-800">
                     <span>${i.quantity}x ${i.title}</span>
-                    <span>$${(i.price * i.quantity).toLocaleString('es-AR')}</span>
+                    <span>$${formatMoney(Number(i.price) * Number(i.quantity))}</span>
                 </div>
             `).join('');
 
-            let totalsHTML = `<div>Subtotal: $${sale.subtotal.toLocaleString('es-AR')}</div>`;
-            if (sale.surcharge > 0) totalsHTML += `<div class="text-amber-700">Recargo tarjeta: +$${sale.surcharge.toLocaleString('es-AR')}</div>`;
-            if (sale.canjeDeduction > 0) totalsHTML += `<div class="text-amber-700">Plan Canje: -$${sale.canjeDeduction.toLocaleString('es-AR')}</div>`;
-            totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
+            let totalsHTML = `<div>Subtotal: $${formatMoney(sale.subtotal)}</div>`;
+            if (sale.surcharge > 0) totalsHTML += `<div class="text-amber-700">Recargo tarjeta: +$${formatMoney(sale.surcharge)}</div>`;
+            if (sale.canjeDeduction > 0) totalsHTML += `<div class="text-amber-700">Plan Canje: -$${formatMoney(sale.canjeDeduction)}</div>`;
+            totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${formatMoney(sale.total)}</div>`;
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
             document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
-            document.getElementById('finalizeWithoutReceiptBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
             document.getElementById('receiptModal').classList.remove('hidden');
         }
 
@@ -1459,9 +2249,13 @@ let IPHONE_TRADE_IN_RATES = [];
             sale.status = 'Confirmada';
             sale.deliveryMethod = deliveryMethod;
             sale.items.forEach(item => {
-                if (item.type !== 'acc') return;
-                const product = PRODUCTS.find(productItem => productItem.id === item.id);
-                if (product?.stock === 0) product.status = 'Anulado';
+                if (item.type === 'acc') {
+                    const product = PRODUCTS.find(productItem => productItem.id === item.id);
+                    if (product?.stock === 0) product.status = 'Anulado';
+                } else if (item.type === 'phone') {
+                    const phone = PHONES.find(phoneItem => phoneItem.id === item.id);
+                    if (phone?.status === 'Reservado') phone.status = 'Vendido';
+                }
             });
             await saveLocalState();
             pendingSaleId = null;
@@ -1527,9 +2321,9 @@ let IPHONE_TRADE_IN_RATES = [];
             msg += 'N Ticket: ' + lastCreatedSale.id + '\nFecha: ' + lastCreatedSale.date + '\nCliente: ' + lastCreatedSale.customerName + '\n\n';
             msg += 'Detalle de Productos:\n';
             lastCreatedSale.items.forEach((item, index) => {
-                msg += (index + 1) + '. ' + item.quantity + 'x ' + item.title + ' - ' + (item.price * item.quantity).toLocaleString('es-AR') + '\n';
+                msg += (index + 1) + '. ' + item.quantity + 'x ' + item.title + ' - ' + formatMoney(Number(item.price) * Number(item.quantity)) + '\n';
             });
-            msg += '\nTotal Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + '\n';
+            msg += '\nTotal Pagado: ' + formatMoney(lastCreatedSale.total) + '\n';
             msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + '\n\nGracias por elegir BE STORE! @bestoreok';
             window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
             if (pendingSaleId) await finalizePendingSale('WhatsApp');
@@ -1705,7 +2499,7 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!category) return;
             const products = PRODUCTS.filter(product => product.category === categoryId);
             document.getElementById('categoryProductsTitle').textContent = `${category.name} (${products.length})`;
-            document.getElementById('categoryProductsList').innerHTML = products.map(product => `<div class="border border-slate-200 rounded-xl p-3 flex items-center justify-between"><div><p class="font-bold text-xs text-slate-900">${product.title}</p><p class="text-[10px] text-slate-500">${product.brand} · Stock: ${product.stock}</p></div><span class="font-mono-num font-bold text-xs">$${product.price.toLocaleString('es-AR')}</span></div>`).join('') || '<p class="text-xs text-slate-400">No hay productos en esta categoría.</p>';
+            document.getElementById('categoryProductsList').innerHTML = products.map(product => `<div class="border border-slate-200 rounded-xl p-3 flex items-center justify-between"><div><p class="font-bold text-xs text-slate-900">${product.title}</p><p class="text-[10px] text-slate-500">${product.brand} · Stock: ${product.stock}</p></div><span class="font-mono-num font-bold text-xs">$${formatMoney(product.price)}</span></div>`).join('') || '<p class="text-xs text-slate-400">No hay productos en esta categoría.</p>';
             document.getElementById('categoryProductsPanel').classList.remove('hidden');
         }
 
@@ -1722,7 +2516,9 @@ let IPHONE_TRADE_IN_RATES = [];
                 const contact = whatsappNumber
                     ? `<a href="https://wa.me/${whatsappNumber}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline" title="Enviar mensaje por WhatsApp"><i class="fa-brands fa-whatsapp"></i>${client.phone}</a>`
                     : '-';
-                return `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${contact}${client.email ? `<span class="block text-[10px] text-slate-500">${client.email}</span>` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Cuenta corriente: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td><td class="p-3 text-center"><button onclick="editClient('${client.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar cliente"><i class="fa-solid fa-pen"></i></button></td></tr>`;
+                const balance = Number(client.accountBalance) || 0;
+                const balanceLabel = balance > 0 ? `Cuenta corriente: $${balance.toLocaleString('es-AR')}` : balance < 0 ? `Saldo a favor: $${Math.abs(balance).toLocaleString('es-AR')}` : '';
+                return `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${contact}${client.email ? `<span class="block text-[10px] text-slate-500">${client.email}</span>` : ''}</td><td class="p-3">${client.purchaseCount || 0}${balanceLabel ? `<span class="block text-[10px] font-mono-num ${balance < 0 ? 'text-emerald-700' : 'text-amber-700'}">${balanceLabel}</span>` : ''}</td><td class="p-3 text-center"><button onclick="editClient('${client.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar cliente"><i class="fa-solid fa-pen"></i></button></td></tr>`;
             }).join('') || '<tr><td colspan="4" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
         }
 
@@ -2245,6 +3041,8 @@ let IPHONE_TRADE_IN_RATES = [];
             localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+            localStorage.setItem('bestore_internal_returns', JSON.stringify(RETURNS));
+            localStorage.setItem('bestore_internal_defectives', JSON.stringify(DEFECTIVES));
             localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
             localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
             localStorage.setItem('bestore_internal_purchases', JSON.stringify(PURCHASES));
@@ -2270,6 +3068,8 @@ let IPHONE_TRADE_IN_RATES = [];
                         products: PRODUCTS,
                         phones: PHONES,
                         sales: SALES,
+                        returns: RETURNS,
+                        defectives: DEFECTIVES,
                         clients: CLIENTS,
                         suppliers: SUPPLIERS,
                         purchases: PURCHASES,
@@ -2280,7 +3080,7 @@ let IPHONE_TRADE_IN_RATES = [];
                         cashRegister,
                         dailyDollarRate
                     }
-                    : { sales: SALES };
+                    : { sales: SALES, products: PRODUCTS, phones: PHONES, clients: CLIENTS, returns: RETURNS, defectives: DEFECTIVES };
                 const payload = sanitizeForFirestore({
                     ...state,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2299,10 +3099,14 @@ let IPHONE_TRADE_IN_RATES = [];
             const p = localStorage.getItem('bestore_internal_products');
             const ph = localStorage.getItem('bestore_internal_phones');
             const s = localStorage.getItem('bestore_internal_sales');
+            const returns = localStorage.getItem('bestore_internal_returns');
+            const defectives = localStorage.getItem('bestore_internal_defectives');
 
             if (p) try { PRODUCTS = JSON.parse(p); } catch(e){}
             if (ph) try { PHONES = JSON.parse(ph); } catch(e){}
             if (s) try { SALES = JSON.parse(s); } catch(e){}
+            if (returns) try { RETURNS = JSON.parse(returns); } catch(e){}
+            if (defectives) try { DEFECTIVES = JSON.parse(defectives); } catch(e){}
             const c = localStorage.getItem('bestore_internal_clients');
             if (c) try { CLIENTS = JSON.parse(c); } catch(e){}
             [['bestore_internal_suppliers', value => SUPPLIERS = value], ['bestore_internal_purchases', value => PURCHASES = value], ['bestore_internal_supplier_payments', value => SUPPLIER_PAYMENTS = value]].forEach(([key, assign]) => {
@@ -2327,6 +3131,8 @@ let IPHONE_TRADE_IN_RATES = [];
                     PRODUCTS = remoteState.products || PRODUCTS;
                     PHONES = remoteState.phones || PHONES;
                     SALES = remoteState.sales || SALES;
+                    RETURNS = remoteState.returns || RETURNS;
+                    DEFECTIVES = remoteState.defectives || DEFECTIVES;
                     CLIENTS = remoteState.clients || CLIENTS;
                     SUPPLIERS = remoteState.suppliers || SUPPLIERS;
                     PURCHASES = remoteState.purchases || PURCHASES;
@@ -2340,6 +3146,8 @@ let IPHONE_TRADE_IN_RATES = [];
                     localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
                     localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
                     localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+                    localStorage.setItem('bestore_internal_returns', JSON.stringify(RETURNS));
+                    localStorage.setItem('bestore_internal_defectives', JSON.stringify(DEFECTIVES));
                     localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
             localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
             localStorage.setItem('bestore_internal_purchases', JSON.stringify(PURCHASES));
@@ -2352,11 +3160,23 @@ let IPHONE_TRADE_IN_RATES = [];
                     PRODUCTS = [];
                     PHONES = [];
                     SALES = [];
+                    RETURNS = [];
+                    DEFECTIVES = [];
                     CLIENTS = [];
                     await saveLocalState();
                 }
             } catch (error) {
                 console.error('Firestore no disponible, se usara almacenamiento local:', error);
+            }
+        }
+
+        function showStateSaveToast(synced, message) {
+            if (!firebase.auth().currentUser) {
+                showToast(`${message} Solo quedó guardado en este dispositivo; inicia sesión para sincronizar.`);
+            } else if (!synced) {
+                showToast(`${message} No se pudo sincronizar con Firebase; revisa tu conexión antes de usarlo en otro dispositivo.`);
+            } else {
+                showToast(message);
             }
         }
 

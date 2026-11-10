@@ -81,6 +81,10 @@ body {
     line-height: 1.1;
 }
 
+.mobile-nav-item.hidden {
+    display: none;
+}
+
 .mobile-nav-item i {
     font-size: 1rem;
 }

@@ -23,7 +23,7 @@ service cloud.firestore {
     match /app_state/{document} {
       allow read: if signedIn();
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isSeller() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'updatedAt']));
+      allow update: if isAdmin() || (isSeller() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'products', 'phones', 'clients', 'returns', 'defectives', 'updatedAt']));
     }
 
   }
