@@ -14,8 +14,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="js/app.js"></script>
-    <script src="js/suppliers.js"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -96,9 +96,6 @@
                 <button onclick="switchTab('clients')" id="nav-clients" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-users text-emerald-600 w-4 text-center"></i><span>Clientes</span>
                 </button>
-                <button onclick="switchTab('suppliers')" id="nav-suppliers" class="sidebar-item hidden w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-truck-field text-sky-600 w-4 text-center"></i><span>Proveedores</span>
-                </button>
                 <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-chart-pie text-brand-500 w-4 text-center"></i>
                     <span>Dashboard / Resumen</span>
@@ -106,12 +103,6 @@
                 <button onclick="switchTab('sales-history')" id="nav-sales-history" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-receipt text-slate-500 w-4 text-center"></i>
                     <span>Historial de Ventas</span>
-                </button>
-                <button onclick="switchTab('returns')" id="nav-returns" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-arrow-rotate-left text-amber-600 w-4 text-center"></i><span>Devoluciones</span>
-                </button>
-                <button onclick="switchTab('defectives')" id="nav-defectives" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
-                    <i class="fa-solid fa-triangle-exclamation text-red-600 w-4 text-center"></i><span>Productos defectuosos</span>
                 </button>
                 <button onclick="switchTab('canje-calculator')" id="nav-canje-calculator" class="sidebar-item w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-arrows-rotate text-emerald-500 w-4 text-center"></i>
@@ -156,12 +147,9 @@
         <button onclick="switchTab('inventory-acc')" data-tab-nav="inventory-acc" class="mobile-nav-item" title="Accesorios"><i class="fa-solid fa-boxes-stacked"></i><span>Stock</span></button>
         <button onclick="switchTab('inventory-phones')" data-tab-nav="inventory-phones" class="mobile-nav-item" title="Celulares"><i class="fa-solid fa-mobile-screen-button"></i><span>Celulares</span></button>
         <button onclick="switchTab('sales-history')" data-tab-nav="sales-history" class="mobile-nav-item" title="Ventas"><i class="fa-solid fa-receipt"></i><span>Ventas</span></button>
-        <button onclick="switchTab('returns')" data-tab-nav="returns" class="mobile-nav-item" title="Devoluciones"><i class="fa-solid fa-arrow-rotate-left"></i><span>Devoluciones</span></button>
-        <button onclick="switchTab('defectives')" data-tab-nav="defectives" class="mobile-nav-item" title="Defectuosos"><i class="fa-solid fa-triangle-exclamation"></i><span>Defectuosos</span></button>
         <button onclick="switchTab('canje-calculator')" data-tab-nav="canje-calculator" class="mobile-nav-item" title="Plan canje"><i class="fa-solid fa-arrows-rotate"></i><span>Canje</span></button>
         <button onclick="switchTab('categories')" data-tab-nav="categories" class="mobile-nav-item" title="Categorías"><i class="fa-solid fa-tags"></i><span>Categorías</span></button>
         <button onclick="switchTab('clients')" data-tab-nav="clients" class="mobile-nav-item" title="Clientes"><i class="fa-solid fa-users"></i><span>Clientes</span></button>
-        <button onclick="switchTab('suppliers')" id="mobile-nav-suppliers" data-tab-nav="suppliers" class="mobile-nav-item hidden" title="Proveedores"><i class="fa-solid fa-truck-field"></i><span>Proveedores</span></button>
         <button onclick="openUserModal()" class="mobile-nav-item" title="Usuarios"><i class="fa-solid fa-users-gear"></i><span>Usuarios</span></button>
     </nav>
 
@@ -279,14 +267,12 @@
                             <p id="cashRegisterStatus" class="text-xs text-slate-500 mt-1">Caja cerrada</p>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full md:w-auto">
-                            <label class="text-[10px] font-bold text-slate-500">Efectivo inicial<input id="openingCashInput" type="number" min="0" value="0" placeholder="0" class="mt-0.5 w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-normal"></label>
-                            <label class="text-[10px] font-bold text-slate-500">Cuentas bancarias<input id="openingBankInput" type="number" min="0" value="0" placeholder="0" class="mt-0.5 w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-normal"></label>
-                            <label class="text-[10px] font-bold text-slate-500">Mercado Pago<input id="openingMpInput" type="number" min="0" value="0" placeholder="0" class="mt-0.5 w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-normal"></label>
+                            <input id="openingCashInput" type="number" min="0" placeholder="Fondo inicial" class="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
                             <button onclick="openCashRegister()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-lock-open mr-1"></i> Abrir caja</button>
                             <button onclick="closeCashRegister()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-lock mr-1"></i> Cerrar caja</button>
                         </div>
                     </div>
-                    <div id="cashRegisterSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mt-4 text-xs"></div>
+                    <div id="cashRegisterSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs"></div>
                 </div>
 
                 <!-- Main Charts & Recent Activity Grid -->
@@ -401,7 +387,7 @@
                     </div>
 
                     <!-- Items Grid Picker -->
-                    <div id="posItemsGrid" class="grid gap-3 content-start [grid-template-columns:repeat(auto-fill,minmax(150px,200px))] justify-start overflow-y-auto flex-1 max-h-[calc(100vh-280px)] pr-1">
+                    <div id="posItemsGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto flex-1 max-h-[calc(100vh-280px)] pr-1">
                         <!-- Populated dynamically -->
                     </div>
 
@@ -447,12 +433,9 @@
                         <!-- Payment Method Toggle -->
                         <div class="space-y-1">
                             <label class="block text-[11px] font-bold text-slate-700">Forma de Pago:</label>
-                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                                <button id="posPayCash" onclick="setPOSPaymentMethod('cash')" class="py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition">
-                                    Efectivo
-                                </button>
-                                <button id="posPayTransfer" onclick="setPOSPaymentMethod('transfer')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
-                                    Transferencia (Mercado Pago)
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <button id="posPayTransfer" onclick="setPOSPaymentMethod('transfer')" class="py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition">
+                                    Efectivo / Transferencia
                                 </button>
                                 <button id="posPayCard" onclick="setPOSPaymentMethod('card')" class="py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition">
                                     Tarjeta de crédito
@@ -464,11 +447,10 @@
                                     Cuenta corriente
                                 </button>
                             </div>
-                            <div id="mixedPaymentFields" class="hidden grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
-                                <label class="text-[10px] font-semibold text-slate-500">Efectivo<input id="mixedCashAmount" type="number" min="0" oninput="calculatePOSTotals()" placeholder="0" class="mt-1 w-full py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs"></label>
-                                <label class="text-[10px] font-semibold text-slate-500">Transferencia / Mercado Pago<input id="mixedTransferAmount" type="number" min="0" oninput="calculatePOSTotals()" placeholder="0" class="mt-1 w-full py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs"></label>
-                                <label class="text-[10px] font-semibold text-slate-500">Tarjeta<input id="mixedCardAmount" type="number" min="0" oninput="calculatePOSTotals()" placeholder="0" class="mt-1 w-full py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs"></label>
-                                <p class="sm:col-span-3 text-[10px] text-slate-500">Distribuye el saldo neto entre los medios. El recargo se suma únicamente al importe de tarjeta.</p>
+                            <div id="mixedPaymentFields" class="hidden grid grid-cols-2 gap-2 mt-2">
+                                <input id="mixedCashAmount" type="number" min="0" oninput="syncMixedPayment('cash')" placeholder="Efectivo / transferencia" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <input id="mixedCardAmount" type="number" min="0" oninput="syncMixedPayment('card')" placeholder="Tarjeta" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <p class="col-span-2 text-[10px] text-slate-500">Los importes se completan sobre el saldo neto. El recargo de la tarjeta se suma según el plan seleccionado.</p>
                             </div>
                             <select id="cardPlanSelect" onchange="calculatePOSTotals()" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold"></select>
                             <p id="cardPlanHint" class="text-[10px] text-slate-500 mt-1">Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.</p>
@@ -679,46 +661,6 @@
                 </div>
             </section>
 
-            <section id="view-returns" class="hidden space-y-4">
-                <div class="custom-card p-4">
-                    <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-arrow-rotate-left text-amber-600"></i> Registro de devoluciones</h3>
-                    <p class="mt-1 text-xs text-slate-500">Las devoluciones no borran ni reemplazan la venta original. Se registran por separado y actualizan el stock o la sección de defectuosos.</p>
-                </div>
-                <div class="custom-card overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full min-w-[48rem] text-left text-xs border-collapse">
-                            <thead><tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider"><th class="p-3.5">Fecha / Ticket</th><th class="p-3.5">Cliente</th><th class="p-3.5">Productos</th><th class="p-3.5">Motivo</th><th class="p-3.5">Reintegro</th><th class="p-3.5">Destino</th></tr></thead>
-                            <tbody id="returnsTableBody" class="divide-y divide-bonewhite-border text-slate-700"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <section id="view-defectives" class="hidden space-y-4">
-                <div class="custom-card p-4">
-                    <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-red-600"></i> Productos defectuosos</h3>
-                    <p class="mt-1 text-xs text-slate-500">Los artículos en revisión quedan fuera del stock vendible. Al repararlos se reintegran al inventario; al descartarlos permanecen fuera de stock.</p>
-                </div>
-                <div id="defectiveIntakePanel" class="custom-card p-4">
-                    <h4 class="font-bold text-slate-800 text-xs mb-3">Registrar producto defectuoso desde el stock</h4>
-                    <form onsubmit="registerDefectiveProduct(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-                        <select id="defectiveItemType" onchange="populateDefectiveItemOptions()" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"><option value="acc">Accesorio / producto</option><option value="phone">Celular</option></select>
-                        <select id="defectiveItemSelect" required onchange="updateDefectiveQuantityLimit()" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"></select>
-                        <input id="defectiveQuantity" type="number" min="1" step="1" value="1" required class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs" aria-label="Cantidad defectuosa">
-                        <input id="defectiveReason" required maxlength="250" placeholder="Falla / detalle" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <button class="bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl p-2.5 text-xs">Enviar a revisión</button>
-                    </form>
-                </div>
-                <div class="custom-card overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full min-w-[48rem] text-left text-xs border-collapse">
-                            <thead><tr class="bg-slate-50 border-b border-bonewhite-border text-slate-500 font-bold uppercase tracking-wider"><th class="p-3.5">Fecha / Ticket</th><th class="p-3.5">Producto</th><th class="p-3.5">Cantidad</th><th class="p-3.5">Falla</th><th class="p-3.5">Estado</th><th class="p-3.5 text-center">Acciones</th></tr></thead>
-                            <tbody id="defectivesTableBody" class="divide-y divide-bonewhite-border text-slate-700"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
             <!-- SECTION 6: PLAN CANJE CALCULATOR & INTAKE -->
             <section id="view-canje-calculator" class="hidden space-y-6">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -835,90 +777,7 @@
                 <div class="custom-card overflow-hidden"><div class="overflow-x-auto"><table class="min-w-[40rem] w-full text-left text-xs"><thead><tr class="bg-slate-50 border-b border-slate-200"><th class="p-3">Cliente</th><th class="p-3">Contacto</th><th class="p-3">Compras</th><th class="p-3 text-center">Acciones</th></tr></thead><tbody id="clientsTableBody"></tbody></table></div></div>
             </section>
 
-            <!-- SECTION: PROVEEDORES -->
-            <section id="view-suppliers" class="hidden space-y-4">
-                <div id="supplierSummary" class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs"></div>
-                <div class="custom-card p-5">
-                    <h3 id="supplierFormTitle" class="font-extrabold text-slate-900 mb-4">Proveedores</h3>
-                    <form onsubmit="saveSupplier(event)" class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                        <input id="supplierId" type="hidden">
-                        <input id="supplierName" required placeholder="Razón social / nombre *" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierTaxId" placeholder="CUIT / CUIL" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierCategory" placeholder="Rubro (accesorios, celulares, etc.)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierContact" placeholder="Contacto" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierPhone" placeholder="Teléfono / WhatsApp" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierEmail" type="email" placeholder="Email" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <input id="supplierBank" placeholder="Alias / CBU / CVU para transferencias" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs md:col-span-2">
-                        <input id="supplierNotes" placeholder="Notas (condiciones, plazos)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
-                        <div class="md:col-span-3 flex gap-2">
-                            <button id="supplierSubmitButton" class="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 rounded-xl text-xs">Registrar proveedor</button>
-                            <button id="cancelSupplierEditButton" type="button" onclick="cancelSupplierEdit()" class="hidden bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs" title="Cancelar edición"><i class="fa-solid fa-xmark"></i></button>
-                        </div>
-                    </form>
-                </div>
-                <div class="custom-card overflow-hidden">
-                    <div class="overflow-x-auto"><table class="min-w-[52rem] w-full text-left text-xs">
-                        <thead><tr class="bg-slate-50 border-b border-slate-200"><th class="p-3">Proveedor</th><th class="p-3">Contacto / pago</th><th class="p-3 text-right">Comprado</th><th class="p-3 text-right">Pagado</th><th class="p-3 text-right">Deuda</th><th class="p-3 text-center">Acciones</th></tr></thead>
-                        <tbody id="suppliersTableBody"></tbody>
-                    </table></div>
-                </div>
-                <div id="supplierDetail" class="custom-card p-5 hidden"></div>
-            </section>
-
         </main>
-    </div>
-
-
-    <!-- MODAL: COMPRA A PROVEEDOR -->
-    <div id="purchaseModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-y-auto p-6 space-y-4 shadow-2xl border border-bonewhite-border">
-            <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
-                <h3 class="font-extrabold text-slate-900 text-base">Registrar compra a proveedor</h3>
-                <button type="button" onclick="closePurchaseModal()" class="text-slate-400 hover:text-slate-700 text-lg"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form onsubmit="savePurchase(event)" class="space-y-3 text-xs">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <label class="col-span-2 font-bold text-slate-700">Proveedor *<select id="purchaseSupplier" required class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></select></label>
-                    <label class="font-bold text-slate-700">Fecha<input id="purchaseDate" type="date" required class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="font-bold text-slate-700">N° comprobante / link<input id="purchaseReceipt" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal" placeholder="Factura, remito o URL"></label>
-                    <label class="font-bold text-slate-700">Tipo de compra<select id="purchaseType" onchange="renderPurchaseLines()" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option value="products">Productos / accesorios</option><option value="phones">Celulares</option></select></label>
-                    <label class="font-bold text-slate-700">Moneda<select id="purchaseCurrency" onchange="updatePurchaseTotal()" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></label>
-                    <label class="col-span-2 font-bold text-slate-700">Notas<input id="purchaseNotes" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                </div>
-                <div id="purchaseLines" class="space-y-2"></div>
-                <button type="button" onclick="addPurchaseLine()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl"><i class="fa-solid fa-plus mr-1"></i>Agregar línea</button>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 items-end border-t border-slate-200 pt-3">
-                    <div><span class="block text-slate-500">Total de la compra</span><strong id="purchaseTotalLabel" class="text-sm">$0</strong></div>
-                    <label class="font-bold text-slate-700">Pago inicial (ARS)<input id="purchasePaidNow" type="number" min="0" value="0" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="font-bold text-slate-700">Medio de pago<select id="purchasePayMethod" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option>Transferencia</option><option>Efectivo</option><option>Mercado Pago</option><option>Otro</option></select></label>
-                    <button class="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 rounded-xl">Guardar compra</button>
-                </div>
-                <p class="text-[10px] text-slate-500">Al guardar, los productos suman stock y los celulares ingresan como "En Stock" en Celulares. Si la compra es en USD se convierte al dólar del día.</p>
-            </form>
-        </div>
-    </div>
-
-    <!-- MODAL: PAGO A PROVEEDOR -->
-    <div id="supplierPaymentModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
-            <div class="flex items-center justify-between border-b border-bonewhite-border pb-3">
-                <h3 id="supplierPaymentTitle" class="font-extrabold text-slate-900 text-base">Pago a proveedor</h3>
-                <button type="button" onclick="closeSupplierPaymentModal()" class="text-slate-400 hover:text-slate-700 text-lg"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form onsubmit="saveSupplierPayment(event)" class="space-y-3 text-xs">
-                <input id="paymentSupplierId" type="hidden">
-                <p id="paymentSupplierDebt" class="text-slate-600"></p>
-                <label class="block font-bold text-slate-700">Aplicar a<select id="paymentPurchase" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></select></label>
-                <div class="grid grid-cols-2 gap-2">
-                    <label class="font-bold text-slate-700">Importe (ARS) *<input id="paymentAmount" type="number" min="1" step="any" required class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="font-bold text-slate-700">Medio<select id="paymentMethod" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option>Transferencia</option><option>Efectivo</option><option>Mercado Pago</option><option>Otro</option></select></label>
-                    <label class="font-bold text-slate-700">Fecha<input id="paymentDate" type="date" required class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="font-bold text-slate-700">N° operación / comprobante<input id="paymentReference" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                </div>
-                <button class="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 rounded-xl">Registrar pago</button>
-                <p class="text-[10px] text-slate-500">Los pagos en efectivo de hoy se descuentan del efectivo esperado de la caja diaria.</p>
-            </form>
-        </div>
     </div>
 
     <!-- MODAL 1: ADD / EDIT PRODUCT (ACCESORIOS & TECNOLOGÍA) -->
@@ -992,6 +851,18 @@
                         <label class="block font-bold text-emerald-700 mb-1">Efectivo/Transferencia</label>
                         <input type="number" id="prodCashPrice" readonly class="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-2.5 text-xs font-bold font-mono-num">
                     </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Imagen del producto (Opcional)</label>
+                    <input type="file" id="prodImageFile" accept="image/*" onchange="previewSelectedImage(this, 'prodImagePreview')" class="hidden">
+                    <div class="image-url-field">
+                        <input type="url" id="prodImage" placeholder="URL de imagen o usar + para elegir un archivo" onchange="previewImageUrl(this.value, 'prodImagePreview')" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-12 text-xs">
+                        <button type="button" onclick="openImageFilePicker('prodImageFile')" class="image-picker-button" title="Elegir imagen del dispositivo" aria-label="Elegir imagen del dispositivo">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <img id="prodImagePreview" class="product-image-preview hidden" alt="Vista previa de la imagen del producto">
                 </div>
 
                 <div>
@@ -1118,6 +989,18 @@
                         </div>
                     </div>
 
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Imagen del smartphone (Opcional)</label>
+                    <input type="file" id="phoneImageFile" accept="image/*" onchange="previewSelectedImage(this, 'phoneImagePreview')" class="hidden">
+                    <div class="image-url-field">
+                        <input type="url" id="phoneImage" placeholder="URL de imagen o usar + para elegir un archivo" onchange="previewImageUrl(this.value, 'phoneImagePreview')" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-12 text-xs">
+                        <button type="button" onclick="openImageFilePicker('phoneImageFile')" class="image-picker-button" title="Elegir imagen del dispositivo" aria-label="Elegir imagen del dispositivo">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <img id="phoneImagePreview" class="product-image-preview hidden" alt="Vista previa de la imagen del smartphone">
+                </div>
+
                 <div class="pt-3 flex justify-end gap-2">
                     <button type="button" onclick="closePhoneModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancelar</button>
                     <button type="submit" class="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-sm">Guardar Smartphone</button>
@@ -1172,93 +1055,6 @@
                     <i class="fa-brands fa-whatsapp"></i> Enviar por WhatsApp
                 </button>
             </div>
-        </div>
-    </div>
-
-    <div id="salePaymentModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div>
-                    <h3 class="font-extrabold text-slate-900">Modificar medio de pago</h3>
-                    <p id="salePaymentReference" class="text-[11px] text-slate-500 mt-1"></p>
-                </div>
-                <button type="button" onclick="closeSalePaymentModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form onsubmit="saveSalePaymentMethod(event)" class="space-y-3">
-                <input id="salePaymentId" type="hidden">
-                <p class="text-xs text-slate-600">Solo se modifica la forma de pago; el total y los demás datos de la venta no cambian.</p>
-                <label class="block text-xs font-bold text-slate-700">Forma de pago
-                    <select id="salePaymentMethod" onchange="toggleSaleMixedPaymentFields()" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal">
-                        <option value="cash">Efectivo</option>
-                        <option value="transfer">Transferencia (Mercado Pago)</option>
-                        <option value="card">Tarjeta</option>
-                        <option value="mixed">Mixto</option>
-                        <option value="account">Cuenta corriente</option>
-                    </select>
-                </label>
-                <div id="saleMixedPaymentFields" class="hidden grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <label class="text-[10px] font-semibold text-slate-500">Efectivo<input id="saleMixedCash" type="number" min="0" step="any" placeholder="0" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="text-[10px] font-semibold text-slate-500">Transferencia / Mercado Pago<input id="saleMixedTransfer" type="number" min="0" step="any" placeholder="0" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="text-[10px] font-semibold text-slate-500">Tarjeta<input id="saleMixedCard" type="number" min="0" step="any" placeholder="0" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <p id="saleMixedPaymentTotal" class="sm:col-span-3 text-[10px] text-slate-500"></p>
-                </div>
-                <div class="flex justify-end gap-2 pt-2">
-                    <button type="button" onclick="closeSalePaymentModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-xs">Guardar medio de pago</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div id="saleEditModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl">
-            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div><h3 class="font-extrabold text-slate-900">Editar venta realizada</h3><p id="saleEditReference" class="text-[11px] text-slate-500 mt-1"></p></div>
-                <button type="button" onclick="closeSaleEditModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form onsubmit="saveSaleEdit(event)" class="space-y-4">
-                <input id="saleEditId" type="hidden">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <label class="text-xs font-bold text-slate-700">Cliente<input id="saleEditCustomerName" required maxlength="120" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                    <label class="text-xs font-bold text-slate-700">Teléfono<input id="saleEditCustomerPhone" maxlength="40" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                </div>
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between"><h4 class="text-xs font-bold text-slate-700">Productos vendidos</h4><span id="saleEditTotal" class="text-xs font-extrabold text-emerald-700"></span></div>
-                    <div id="saleEditItems" class="space-y-2"></div>
-                    <div class="flex gap-2">
-                        <select id="saleEditAddItem" class="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"></select>
-                        <button type="button" onclick="addSaleEditItem()" class="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar</button>
-                    </div>
-                </div>
-                <label class="block text-xs font-bold text-slate-700">Motivo del cambio<input id="saleEditReason" required maxlength="250" placeholder="Describe brevemente el motivo" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                <p class="text-[10px] text-slate-500">El total y los importes del medio de pago se ajustarán con los productos editados. Las unidades devueltas no se pueden quitar de la venta; registrá esas operaciones en Devoluciones.</p>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="closeSaleEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-xs">Guardar cambios</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div id="saleReturnModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl">
-            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div><h3 class="font-extrabold text-slate-900">Registrar devolución</h3><p id="saleReturnReference" class="text-[11px] text-slate-500 mt-1"></p></div>
-                <button type="button" onclick="closeSaleReturnModal()" class="text-slate-400 hover:text-slate-700 text-lg" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form onsubmit="processSaleReturn(event)" class="space-y-4">
-                <input id="saleReturnId" type="hidden">
-                <div id="saleReturnItems" class="space-y-2"></div>
-                <label class="block text-xs font-bold text-slate-700">Motivo de devolución<input id="saleReturnReason" required maxlength="250" placeholder="Motivo" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"></label>
-                <label class="block text-xs font-bold text-slate-700">Medio de reintegro
-                    <select id="saleReturnMethod" class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-normal"><option>Efectivo</option><option>Transferencia (Mercado Pago)</option><option>Tarjeta</option><option value="Ajuste de cuenta corriente">Ajuste de cuenta corriente</option></select>
-                </label>
-                <div class="flex items-center justify-between border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-700">Total a reintegrar</span><strong id="saleReturnTotal" class="text-sm font-extrabold text-amber-700">$0</strong></div>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="closeSaleReturnModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs">Confirmar devolución</button>
-                </div>
-            </form>
         </div>
     </div>
 
