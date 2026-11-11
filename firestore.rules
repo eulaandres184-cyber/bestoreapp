@@ -6,12 +6,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasRole(role) {
+      return signedIn()
+        && request.auth.token.bestoreRole == role
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
     function isAdmin() {
-      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return hasRole('admin');
     }
 
     function isSeller() {
-      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'seller';
+      return hasRole('seller');
     }
 
     match /users/{userId} {
@@ -21,7 +29,7 @@ service cloud.firestore {
     }
 
     match /app_state/{document} {
-      allow read: if signedIn();
+      allow read: if isAdmin() || isSeller();
       allow create: if isAdmin();
       allow update: if isAdmin() || (isSeller() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sales', 'updatedAt']));
     }

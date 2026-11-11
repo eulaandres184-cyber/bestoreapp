@@ -90,11 +90,6 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const imageStorage = firebase.storage();
-// Evita que una subida falle recién a los 2 minutos por reintentos automáticos cuando Storage no está disponible.
-imageStorage.setMaxUploadRetryTime(8000);
-imageStorage.setMaxOperationRetryTime(8000);
-let storageUploadUnavailable = false;
 const appStateRef = db.collection('app_state').doc('main');
 let currentUserProfile = null;
 let CATEGORIES = [
@@ -104,12 +99,6 @@ let CATEGORIES = [
     { id: 'audio', name: 'Audio & Auriculares' }
 ];
 const CARD_PLANS = {
-    'mp-single': { label: 'Mercado Pago - 1 pago', rate: 0.0649 },
-    'mp-3': { label: 'Mercado Pago - 3 cuotas', rate: 0.1249 },
-    'pampa-4': { label: 'Banco Pampa - 4 cuotas', rate: 0 },
-    'pampa-20': { label: 'Banco Pampa - 20 cuotas', rate: 0.20 }
-};
-const PHONE_CARD_PLANS = {
     'phone-mp-3': { label: 'Mercado Pago - 3 cuotas', provider: 'mp', rate: 0.062 },
     'phone-mp-6': { label: 'Mercado Pago - 6 cuotas', provider: 'mp', rate: 0.103 },
     'phone-mp-9': { label: 'Mercado Pago - 9 cuotas', provider: 'mp', rate: 0.153 },
@@ -147,12 +136,18 @@ let IPHONE_TRADE_IN_RATES = [];
         let PHONES = [];
         let SALES = [];
         let CLIENTS = [];
+        let SUPPLIERS = [];
         let cashRegister = { date: '', openingCash: 0, open: false };
+        let secureRegisters = {
+            cash: { open: false, balanceCents: 0, openingCents: 0 },
+            transfer: { open: false, balanceCents: 0, openingCents: 0 },
+            card: { open: false, balanceCents: 0, openingCents: 0 }
+        };
         let dailyDollarRate = 0;
 
         let posState = {
             ticket: [],
-            paymentMethod: 'transfer', // 'transfer' or 'card'
+            paymentMethod: 'transfer',
             selectedCategory: 'ALL',
             phoneConditionFilter: 'ALL'
         };
@@ -231,6 +226,11 @@ let IPHONE_TRADE_IN_RATES = [];
                 const credential = await firebase.auth().signInWithEmailAndPassword(nickEmail(nick), document.getElementById('loginPassword').value);
                 await finishLogin(credential.user);
             } catch (error) {
+                if (currentUserProfile) {
+                    await firebase.auth().signOut();
+                    currentUserProfile = null;
+                }
+                document.getElementById('authScreen').classList.remove('hidden');
                 const isCredentialError = typeof error.code === 'string' && error.code.startsWith('auth/');
                 showAuthMessage(isCredentialError ? 'Nick o clave incorrectos.' : (error.message || 'No se pudo iniciar sesión. Intenta nuevamente.'));
             }
@@ -242,16 +242,27 @@ let IPHONE_TRADE_IN_RATES = [];
                 await firebase.auth().signOut();
                 throw new Error('Usuario sin perfil asignado. Consulte a un administrador.');
             }
-            currentUserProfile = profile.data();
-            if (currentUserProfile.active === false) {
+            const token = await user.getIdTokenResult();
+            currentUserProfile = { ...profile.data(), bestoreRole: token.claims.bestoreRole || null };
+            if (currentUserProfile.active !== true) {
                 await firebase.auth().signOut();
                 currentUserProfile = null;
                 showAuthMessage('Este usuario fue desactivado. Consulte a un administrador.');
                 return;
             }
-            document.getElementById('currentUserName').textContent = `${currentUserProfile.nick} (${currentUserProfile.role === 'admin' ? 'Admin' : 'Vendedor'})`;
-            document.getElementById('authScreen').classList.add('hidden');
+            const roleLabel = isAdmin() ? 'Admin' : isSeller() ? 'Vendedor' : 'Permisos pendientes';
+            document.getElementById('currentUserName').textContent = `${currentUserProfile.nick} (${roleLabel})`;
+            if (!isAdmin() && !isSeller()) {
+                showToast('El perfil y los permisos seguros no coinciden. Solicita a un administrador que vuelva a asignar tu rol.');
+            }
             await loadLocalState();
+            try {
+                await Promise.all([refreshSecureInventory(), refreshSecureRegisters()]);
+            } catch (error) {
+                console.error('No se pudo consultar el inventario y las cajas seguras:', error);
+                showToast('No se pudo consultar el backend seguro. Las ventas nuevas requieren que las funciones estén disponibles y el inventario migrado.');
+            }
+            document.getElementById('authScreen').classList.add('hidden');
             normalizeCommercialData();
             document.getElementById('dailyDollarRate').value = dailyDollarRate || '';
             updatePhonePriceLabel();
@@ -265,6 +276,7 @@ let IPHONE_TRADE_IN_RATES = [];
             renderCategorySelects();
             renderCategoriesPage();
             renderClients();
+            renderSuppliers();
             await loadIphoneTradeInRates();
             updateCanjeModelOptions();
             applyRoleAccess();
@@ -275,7 +287,11 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function isAdmin() {
-            return currentUserProfile?.role === 'admin';
+            return currentUserProfile?.active === true && currentUserProfile?.role === 'admin' && currentUserProfile?.bestoreRole === 'admin';
+        }
+
+        function isSeller() {
+            return currentUserProfile?.active === true && currentUserProfile?.role === 'seller' && currentUserProfile?.bestoreRole === 'seller';
         }
 
         function requireAdmin() {
@@ -289,7 +305,11 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('newProductButton'),
                 document.getElementById('newPhoneButton'),
                 document.getElementById('newCategoryButton'),
-                document.getElementById('intakeUsedPhoneButton')
+                document.getElementById('intakeUsedPhoneButton'),
+                document.getElementById('previewMigrationButton'),
+                document.getElementById('nav-suppliers'),
+                ...document.querySelectorAll('[data-tab-nav="suppliers"]'),
+                document.getElementById('supplierFormCard')
             ];
             adminOnlyElements.filter(Boolean).forEach(element => element.classList.toggle('hidden', !isAdmin()));
             const dollarInput = document.getElementById('dailyDollarRate');
@@ -335,17 +355,29 @@ let IPHONE_TRADE_IN_RATES = [];
             const password = document.getElementById('newUserPassword').value;
             const role = document.getElementById('newUserRole').value;
             const secondaryApp = firebase.initializeApp(firebaseConfig, `seller-${Date.now()}`);
+            let accountCreated = false;
             try {
                 const credential = await secondaryApp.auth().createUserWithEmailAndPassword(nickEmail(nick), password);
+                accountCreated = true;
                 await db.collection('users').doc(credential.user.uid).set({ nick, role, active: true, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                await callSecureFunction('setUserRole', { uid: credential.user.uid, role });
                 document.getElementById('newUserNick').value = '';
                 document.getElementById('newUserPassword').value = '';
-                await secondaryApp.delete();
                 await renderUserList();
                 showToast('Usuario registrado correctamente.');
             } catch (error) {
-                await secondaryApp.delete();
-                showToast(error.code === 'auth/email-already-in-use' ? 'Ese nick ya está registrado.' : 'No se pudo registrar el vendedor.');
+                console.error('No se pudo completar el alta y asignar permisos al usuario:', error);
+                showToast(error.code === 'auth/email-already-in-use'
+                    ? 'Ese nick ya está registrado.'
+                    : accountCreated
+                        ? 'La cuenta se creó, pero no se confirmaron sus permisos. Revisa el usuario y reintenta la asignación desde el panel.'
+                        : (error.message || 'No se pudo registrar el usuario.'));
+            } finally {
+                try {
+                    await secondaryApp.delete();
+                } catch (error) {
+                    console.error('No se pudo cerrar la sesión secundaria de creación de usuarios:', error);
+                }
             }
         }
 
@@ -371,10 +403,15 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('No podés quitarte el rol de administrador.');
                 return;
             }
-            await db.collection('users').doc(userId).update({ role, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-            cancelUserEdit();
-            await renderUserList();
-            showToast('Usuario actualizado correctamente.');
+            try {
+                await callSecureFunction('setUserRole', { uid: userId, role });
+                cancelUserEdit();
+                await renderUserList();
+                showToast('Rol actualizado. El usuario debe volver a iniciar sesión para renovar sus permisos.');
+            } catch (error) {
+                console.error('No se pudo actualizar el rol seguro:', error);
+                showToast(error.message || 'No se pudo actualizar el rol.');
+            }
         }
 
         async function deactivateUser(userId, nick) {
@@ -409,7 +446,8 @@ let IPHONE_TRADE_IN_RATES = [];
 
         /* NAVIGATION & TAB SWITCHING */
         function switchTab(tabId) {
-            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients'];
+            if (tabId === 'suppliers' && !requireAdmin()) return;
+            const tabs = ['dashboard', 'pos', 'inventory-acc', 'inventory-phones', 'sales-history', 'canje-calculator', 'categories', 'clients', 'suppliers'];
             
             tabs.forEach(t => {
                 const navBtn = document.getElementById(`nav-${t}`);
@@ -434,6 +472,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 'inventory-phones': '<i class="fa-solid fa-mobile-screen-button text-purple-600"></i> Stock de Celulares (Nuevos/Usados)',
                 'sales-history': '<i class="fa-solid fa-receipt text-slate-600"></i> Historial de Ventas',
                 'canje-calculator': '<i class="fa-solid fa-arrows-rotate text-emerald-600"></i> Cotizador Plan Canje',
+                'suppliers': '<i class="fa-solid fa-truck-field text-amber-600"></i> Proveedores',
             };
             document.getElementById('pageTitle').innerHTML = titles[tabId] || 'BE STORE System';
 
@@ -445,6 +484,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderCategoriesPage();
             } else if (tabId === 'clients') {
                 renderClients();
+            } else if (tabId === 'suppliers') {
+                renderSuppliers();
             }
         }
 
@@ -533,58 +574,35 @@ let IPHONE_TRADE_IN_RATES = [];
                 : amount.toLocaleString('es-AR');
         }
 
-        function getCardPlanRate() {
-            return CARD_PLANS[document.getElementById('cardPlanSelect').value]?.rate || 0;
-        }
-
         function updatePOSCardPlanOptions() {
             const select = document.getElementById('cardPlanSelect');
-            const hasPhone = posState.ticket.some(item => item.type === 'phone');
-            const plans = hasPhone ? PHONE_CARD_PLANS : CARD_PLANS;
             const currentPlanId = select.value;
-            if (select.dataset.phonePlans === String(hasPhone)) return;
-
-            select.innerHTML = Object.entries(plans).map(([id, plan]) => {
-                if (!hasPhone) {
-                    return `<option value="${id}">${plan.label} (${(plan.rate * 100).toLocaleString('es-AR')}% comisión)</option>`;
-                }
+            select.innerHTML = Object.entries(CARD_PLANS).map(([id, plan]) => {
                 const totalCost = plan.provider === 'mp'
                     ? (plan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE) * (1 + MERCADO_PAGO_VAT_RATE)
                     : plan.rate;
                 return `<option value="${id}">${plan.label} (costo ${ (totalCost * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 }) }%)</option>`;
             }).join('');
-            select.value = Object.prototype.hasOwnProperty.call(plans, currentPlanId)
+            select.value = Object.prototype.hasOwnProperty.call(CARD_PLANS, currentPlanId)
                 ? currentPlanId
-                : Object.keys(plans)[0];
-            select.dataset.phonePlans = String(hasPhone);
+                : Object.keys(CARD_PLANS)[0];
 
             const hint = document.getElementById('cardPlanHint');
-            hint.textContent = hasPhone
-                ? 'Mismos parámetros para celulares nuevos y usados. Precio en cuotas = efectivo / (1 - costo total), redondeado a $100.'
-                : 'Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.';
+            hint.textContent = 'Para todos los productos: precio en cuotas = efectivo / (1 - costo total), redondeado a $100. Mercado Pago incluye IVA sobre la comisión.';
         }
 
         function calculateCardCharges(cardAmount) {
             const planId = document.getElementById('cardPlanSelect').value;
-            const phonePlan = PHONE_CARD_PLANS[planId];
-            if (phonePlan) {
-                const totalCostRate = phonePlan.provider === 'mp'
-                    ? (phonePlan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE) * (1 + MERCADO_PAGO_VAT_RATE)
-                    : phonePlan.rate;
-                const cardTotal = Math.round((cardAmount / (1 - totalCostRate)) / 100) * 100;
-                const commissionRate = phonePlan.provider === 'mp'
-                    ? phonePlan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE
-                    : phonePlan.rate;
-                const commission = Math.round(cardTotal * commissionRate);
-                const vat = phonePlan.provider === 'mp'
-                    ? Math.round(commission * MERCADO_PAGO_VAT_RATE)
-                    : 0;
-                return { commission, vat, total: cardTotal - cardAmount };
-            }
-            const plan = CARD_PLANS[planId] || { rate: 0 };
-            const commission = Math.round(cardAmount * plan.rate);
-            const vat = planId.startsWith('mp-') ? Math.round(commission * MERCADO_PAGO_VAT_RATE) : 0;
-            return { commission, vat, total: commission + vat };
+            const plan = CARD_PLANS[planId];
+            if (!plan) throw new Error('Selecciona un plan de tarjeta válido.');
+            const commissionRate = plan.provider === 'mp'
+                ? plan.rate + MERCADO_PAGO_BASE_COMMISSION_RATE
+                : plan.rate;
+            const totalCostRate = commissionRate * (plan.provider === 'mp' ? 1 + MERCADO_PAGO_VAT_RATE : 1);
+            const cardTotal = Math.round((cardAmount / (1 - totalCostRate)) / 100) * 100;
+            const commission = Math.round(cardTotal * commissionRate);
+            const vat = plan.provider === 'mp' ? Math.round(commission * MERCADO_PAGO_VAT_RATE) : 0;
+            return { commission, vat, total: cardTotal - cardAmount };
         }
 
         async function updateDollarRate() {
@@ -634,7 +652,6 @@ let IPHONE_TRADE_IN_RATES = [];
                 <tr class="hover:bg-slate-50 transition ${item.status === 'Anulado' ? 'opacity-60 bg-slate-100' : ''}">
                     <td class="p-3.5">
                         <div class="accessory-product-cell flex items-center gap-3">
-                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">SKU: ${item.id}</span>
@@ -714,7 +731,6 @@ let IPHONE_TRADE_IN_RATES = [];
                 <tr class="hover:bg-slate-50 transition">
                     <td class="p-3.5">
                         <div class="flex items-center gap-3">
-                            <img src="${item.image}" class="w-9 h-9 rounded-lg object-cover bg-slate-100 border border-slate-200">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.brand} ${item.model}</span>
                                 <span class="text-[10px] text-slate-400 font-mono-num">ID: ${item.id}</span>
@@ -831,7 +847,6 @@ let IPHONE_TRADE_IN_RATES = [];
                                 brand: ph.brand,
                                 price: ph.price,
                                 cashPrice: ph.price,
-                                image: ph.image,
                                 stock: 1,
                                 type: 'phone',
                                 imei: ph.imei
@@ -847,14 +862,9 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             grid.innerHTML = itemsList.map(item => `
-                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer group bg-white">
+                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="pos-product-card custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer bg-white">
                     <div class="space-y-2">
-                        <div class="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">
-                            <img src="${item.image}" class="w-full h-full object-cover group-hover:scale-105 transition">
-                            <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
-                                ${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}
-                            </span>
-                        </div>
+                        <span class="inline-block bg-slate-100 text-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded">${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}</span>
                         <div>
                             <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block">${item.brand}</span>
                             <h4 class="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">${item.title}</h4>
@@ -989,43 +999,16 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function setPOSPaymentMethod(method) {
+            if (!document.getElementById('cardPlanSelect').options.length) updatePOSCardPlanOptions();
             posState.paymentMethod = method;
-            const btnTransf = document.getElementById('posPayTransfer');
-            const btnCard = document.getElementById('posPayCard');
-            const btnMixed = document.getElementById('posPayMixed');
-            const btnAccount = document.getElementById('posPayAccount');
-            const mixedFields = document.getElementById('mixedPaymentFields');
-            posState.paymentMethod = method;
-
-            if (method === 'transfer') {
-                document.getElementById('cardPlanSelect').classList.add('hidden');
-                mixedFields.classList.add('hidden');
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else if (method === 'mixed') {
-                document.getElementById('cardPlanSelect').classList.remove('hidden');
-                mixedFields.classList.remove('hidden');
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else if (method === 'account') {
-                document.getElementById('cardPlanSelect').classList.add('hidden');
-                mixedFields.classList.add('hidden');
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnCard.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            } else {
-                document.getElementById('cardPlanSelect').classList.remove('hidden');
-                mixedFields.classList.add('hidden');
-                btnCard.className = 'py-2 px-2 rounded-xl bg-brand-50 border border-brand-500 text-brand-700 font-bold text-center transition';
-                btnTransf.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnMixed.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-                btnAccount.className = 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
-            }
+            const buttonIds = { cash: 'posPayCash', transfer: 'posPayTransfer', card: 'posPayCard', mixed: 'posPayMixed', account: 'posPayAccount' };
+            Object.entries(buttonIds).forEach(([key, id]) => {
+                document.getElementById(id).className = key === method
+                    ? 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition'
+                    : 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
+            });
+            document.getElementById('cardPlanSelect').classList.toggle('hidden', method !== 'card' && method !== 'mixed');
+            document.getElementById('mixedPaymentFields').classList.toggle('hidden', method !== 'mixed');
 
             calculatePOSTotals();
         }
@@ -1074,31 +1057,27 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function calculatePOSTotals() {
-            let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const subtotal = posState.ticket.reduce((sum, item) => sum + Math.round(item.price * 100) * item.quantity, 0) / 100;
             let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
             const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : Math.max(0, subtotal - canjeVal);
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
-            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (${posState.ticket.some(item => item.type === 'phone') ? 'costo cuotas' : 'cargo por tarjeta'})`;
+            document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (costo cuotas)`;
             let finalTotal = Math.max(0, subtotal + surcharge - canjeVal);
 
             document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
             document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
         }
 
-        function syncMixedPayment(source) {
-            const subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
-            const amountDue = Math.max(0, subtotal - canjeVal);
-            const sourceInput = document.getElementById(source === 'cash' ? 'mixedCashAmount' : 'mixedCardAmount');
-            const otherInput = document.getElementById(source === 'cash' ? 'mixedCardAmount' : 'mixedCashAmount');
-            const sourceAmount = Math.min(Math.max(0, parseFloat(sourceInput.value) || 0), amountDue);
-
-            sourceInput.value = sourceAmount || '';
-            otherInput.value = sourceAmount < amountDue ? amountDue - sourceAmount : '';
-            calculatePOSTotals();
+        function createOperationId() {
+            if (crypto.randomUUID) return crypto.randomUUID();
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            bytes[6] = (bytes[6] & 0x0f) | 0x40;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
         }
 
         function processPOSCheckout() {
@@ -1107,24 +1086,33 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast("Cargá al menos un producto al ticket antes de cobrar.");
                 return;
             }
+            if (posState.paymentMethod === 'account') {
+                showToast('Cuenta corriente todavía no está integrada al backend seguro. No se registró la venta.');
+                return;
+            }
 
             const customerName = document.getElementById('posCustomerName').value.trim() || 'Cliente Mostrador';
             const customerPhone = document.getElementById('posCustomerPhone').value.trim() || '-';
-            if (posState.paymentMethod === 'account' && customerName === 'Cliente Mostrador') {
-                showToast('Selecciona o carga un cliente para registrar una venta en cuenta corriente.');
+            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
+            if (!Number.isFinite(canjeVal) || canjeVal < 0) {
+                showToast('Ingresa un descuento de canje válido.');
                 return;
             }
-            const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
+            if (canjeVal > 0) {
+                showToast('Plan canje todavía no está integrado al backend seguro. Quita el descuento para continuar.');
+                return;
+            }
 
-            let subtotal = posState.ticket.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const subtotal = posState.ticket.reduce((sum, item) => sum + Math.round(item.price * 100) * item.quantity, 0) / 100;
             const mixedCash = parseFloat(document.getElementById('mixedCashAmount').value) || 0;
+            const mixedTransfer = parseFloat(document.getElementById('mixedTransferAmount').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
             const netTotal = Math.max(0, subtotal - canjeVal);
-            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) > Math.round(netTotal)) {
-                showToast('El pago mixto no puede superar el importe a cobrar.');
+            if (posState.paymentMethod === 'mixed' && [mixedCash, mixedTransfer, mixedCard].some(amount => !Number.isFinite(amount) || amount < 0)) {
+                showToast('Ingresa importes válidos para cada medio de pago.');
                 return;
             }
-            if (posState.paymentMethod === 'mixed' && Math.round(mixedCash + mixedCard) !== Math.round(netTotal)) {
+            if (posState.paymentMethod === 'mixed' && Math.round((mixedCash + mixedTransfer + mixedCard) * 100) !== Math.round(netTotal * 100)) {
                 showToast('El pago mixto debe completar el importe a cobrar.');
                 return;
             }
@@ -1132,6 +1120,12 @@ let IPHONE_TRADE_IN_RATES = [];
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             let total = netTotal + surcharge;
+            const backendPayment = {
+                cashCents: Math.round((posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'cash' ? total : 0) * 100),
+                transferCents: Math.round((posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'transfer' ? total : 0) * 100),
+                cardBaseCents: Math.round(cardBase * 100),
+                ...(cardBase > 0 ? { cardPlan: document.getElementById('cardPlanSelect').value } : {})
+            };
 
             posOperationInProgress = true;
             const checkoutButton = document.getElementById('posCheckoutButton');
@@ -1139,16 +1133,24 @@ let IPHONE_TRADE_IN_RATES = [];
             checkoutButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Preparando comprobante...</span>';
             const saleRecord = {
                 id: `TK-${Date.now().toString().slice(-5)}`,
+                backendOperationId: createOperationId(),
+                backendPayment,
+                backendSubmissionStarted: false,
                 date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
                 customerName: customerName,
                 customerPhone: customerPhone,
                 items: posState.ticket.map(item => ({ ...item })),
                 status: 'Pendiente de emisión',
-                paymentMethod: posState.paymentMethod === 'transfer' ? 'Efectivo/Transferencia' : posState.paymentMethod === 'mixed' ? 'Pago mixto' : posState.paymentMethod === 'account' ? 'Cuenta corriente' : 'Tarjeta/Cuotas',
+                paymentMethod: { cash: 'Efectivo', transfer: 'Transferencia', mixed: 'Pago mixto', account: 'Cuenta corriente', card: 'Tarjeta/Cuotas' }[posState.paymentMethod],
+                paymentVersion: 2,
                 cardPlan: posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card'
-                    ? (PHONE_CARD_PLANS[document.getElementById('cardPlanSelect').value] || CARD_PLANS[document.getElementById('cardPlanSelect').value])?.label || ''
+                    ? CARD_PLANS[document.getElementById('cardPlanSelect').value]?.label || ''
                     : '',
-                paymentBreakdown: { cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'transfer' ? total : 0, card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0 },
+                paymentBreakdown: {
+                    cash: posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'cash' ? total : 0,
+                    transfer: posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'transfer' ? total : 0,
+                    card: posState.paymentMethod === 'mixed' ? mixedCard + surcharge : posState.paymentMethod === 'card' ? total : 0
+                },
                 cardCommission: cardCharges.commission,
                 cardCommissionVat: cardCharges.vat,
                 canjeDeduction: canjeVal,
@@ -1186,62 +1188,207 @@ let IPHONE_TRADE_IN_RATES = [];
             return new Date().toLocaleDateString('es-AR');
         }
 
+        async function showLegacyMigrationPreview() {
+            if (!requireAdmin()) return;
+            const panel = document.getElementById('migrationPreview');
+            const status = document.getElementById('migrationPreviewStatus');
+            const inventory = document.getElementById('migrationPreviewInventory');
+            const sales = document.getElementById('migrationPreviewSales');
+            const button = document.getElementById('previewMigrationButton');
+            panel.classList.remove('hidden');
+            status.textContent = 'Consultando el backend seguro...';
+            inventory.replaceChildren();
+            sales.replaceChildren();
+            button.disabled = true;
+            try {
+                const response = await firebase.app().functions('us-central1').httpsCallable('previewLegacyMigration')();
+                const preview = response.data;
+                if (!preview || !Array.isArray(preview.inventory) || !Array.isArray(preview.sales)) {
+                    throw new Error('El backend devolvió una respuesta inválida.');
+                }
+                status.textContent = `Inventario: ${preview.inventory.length} registros (${preview.inventoryIssues} con incidencias). Tickets antiguos: ${preview.sales.length} (${preview.saleIssues} con incidencias). No se modificaron datos.`;
+                const renderIssues = (container, label, entries) => {
+                    const title = document.createElement('h5');
+                    title.className = 'font-bold text-slate-800';
+                    title.textContent = label;
+                    container.appendChild(title);
+                    entries.filter(entry => Array.isArray(entry.issues) && entry.issues.length).forEach(entry => {
+                        const line = document.createElement('p');
+                        line.className = 'text-amber-700';
+                        line.textContent = `${entry.id || 'Sin identificador'}: ${entry.issues.join('; ')}`;
+                        container.appendChild(line);
+                    });
+                };
+                renderIssues(inventory, 'Incidencias de inventario', preview.inventory);
+                renderIssues(sales, 'Incidencias de tickets', preview.sales);
+            } catch (error) {
+                console.error('No se pudo consultar la vista previa de migración:', error);
+                status.textContent = 'No se pudo consultar el backend seguro. Verificá que las funciones estén desplegadas y que tu usuario tenga el permiso de administrador asignado.';
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function summarizePayments(sales) {
+            return sales.reduce((result, sale) => {
+                if (sale.paymentMethod === 'Cuenta corriente') return result;
+                const breakdown = sale.paymentBreakdown;
+                if (sale.paymentVersion === 2 && breakdown) {
+                    result.cash += breakdown.cash || 0;
+                    result.transfer += breakdown.transfer || 0;
+                } else {
+                    result.unclassified += breakdown ? breakdown.cash || 0 : sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total;
+                }
+                const card = breakdown ? breakdown.card || 0 : sale.paymentMethod === 'Tarjeta/Cuotas' ? sale.total : 0;
+                if (card && (sale.cardCommission == null || sale.cardCommissionVat == null)) {
+                    result.cardUnknownNet += card;
+                } else {
+                    result.card += card - (sale.cardCommission || 0) - (sale.cardCommissionVat || 0);
+                }
+                return result;
+            }, { cash: 0, transfer: 0, card: 0, cardUnknownNet: 0, unclassified: 0 });
+        }
+
+        async function callSecureFunction(name, payload = {}) {
+            const response = await firebase.app().functions('us-central1').httpsCallable(name)(payload);
+            return response.data;
+        }
+
+        async function refreshSecureInventory() {
+            const inventory = await callSecureFunction('listInventory');
+            if (!Array.isArray(inventory)) throw new Error('El backend devolvió un inventario inválido.');
+            inventory.forEach(item => {
+                if (item.type === 'acc') {
+                    const product = PRODUCTS.find(entry => entry.id === item.id);
+                    if (!product) return;
+                    product.stock = item.stock;
+                    product.price = item.priceCents / 100;
+                    product.cashPrice = product.price;
+                    product.status = item.active && item.stock > 0 ? 'Activo' : 'Anulado';
+                } else if (item.type === 'phone') {
+                    const phone = PHONES.find(entry => entry.id === item.id);
+                    if (!phone) return;
+                    phone.price = item.priceCents / 100;
+                    phone.status = item.active && item.stock > 0 ? 'En Stock' : 'Vendido';
+                }
+            });
+            localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
+            localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
+        }
+
+        async function refreshSecureRegisters() {
+            const statuses = await callSecureFunction('getRegisterStatus');
+            if (!statuses || !['cash', 'transfer', 'card'].every(medium => statuses[medium] && typeof statuses[medium].open === 'boolean')) {
+                throw new Error('El backend devolvió el estado de cajas inválido.');
+            }
+            secureRegisters = statuses;
+            renderSecureRegisterStatus();
+        }
+
+        function renderSecureRegisterStatus() {
+            const labels = { cash: 'cashRegisterStatus', transfer: 'transferRegisterStatus', card: 'cardRegisterStatus' };
+            Object.entries(labels).forEach(([medium, elementId]) => {
+                const register = secureRegisters[medium];
+                const status = document.getElementById(elementId);
+                status.textContent = register.open
+                    ? `Abierta · Saldo $${(register.balanceCents / 100).toLocaleString('es-AR')}`
+                    : 'Caja cerrada';
+            });
+        }
+
         function renderCashRegister() {
             const today = cashRegisterDate();
             const todaySales = SALES.filter(sale => sale.date.includes(today) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
-            const totals = todaySales.reduce((result, sale) => {
-                const breakdown = sale.paymentBreakdown || {
-                    cash: sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total,
-                    card: sale.paymentMethod === 'Tarjeta/Cuotas' ? sale.total : 0
-                };
-                result.cash += breakdown.cash || 0;
-                result.card += breakdown.card || 0;
-                return result;
-            }, { cash: 0, card: 0 });
-            const opening = cashRegister.date === today ? cashRegister.openingCash : 0;
-            const status = cashRegister.date === today && cashRegister.open ? `Abierta con $${opening.toLocaleString('es-AR')} de fondo` : 'Caja cerrada';
-            document.getElementById('cashRegisterStatus').textContent = status;
+            const totals = summarizePayments(todaySales);
+            renderSecureRegisterStatus();
             document.getElementById('cashRegisterSummary').innerHTML = `
-                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Efectivo / transferencia</span><strong class="text-slate-900">$${totals.cash.toLocaleString('es-AR')}</strong></div>
-                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Tarjetas</span><strong class="text-slate-900">$${totals.card.toLocaleString('es-AR')}</strong></div>
-                <div class="bg-emerald-50 rounded-xl p-3"><span class="block text-emerald-700">Efectivo esperado</span><strong class="text-emerald-800">$${(opening + totals.cash).toLocaleString('es-AR')}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Efectivo</span><strong class="text-slate-900">$${totals.cash.toLocaleString('es-AR')}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Transferencias</span><strong class="text-slate-900">$${totals.transfer.toLocaleString('es-AR')}</strong></div>
+                <div class="bg-slate-50 rounded-xl p-3"><span class="block text-slate-500">Tarjetas (neto estimado)</span><strong class="text-slate-900">$${totals.card.toLocaleString('es-AR')}</strong></div>
+                ${totals.cardUnknownNet ? `<div class="bg-amber-50 rounded-xl p-3"><span class="block text-amber-700">Tarjetas sin comisiones registradas (bruto)</span><strong class="text-amber-900">$${totals.cardUnknownNet.toLocaleString('es-AR')}</strong></div>` : ''}
+                ${totals.unclassified ? `<div class="bg-amber-50 rounded-xl p-3"><span class="block text-amber-700">Efectivo / transferencia sin discriminar</span><strong class="text-amber-900">$${totals.unclassified.toLocaleString('es-AR')}</strong></div>` : ''}
+                <div class="bg-emerald-50 rounded-xl p-3"><span class="block text-emerald-700">Efectivo en caja segura</span><strong class="text-emerald-800">$${(secureRegisters.cash.balanceCents / 100).toLocaleString('es-AR')}</strong></div>
             `;
         }
 
-        async function openCashRegister() {
+        async function openSecureRegister(medium) {
             if (!requireAdmin()) return;
-            const opening = parseFloat(document.getElementById('openingCashInput').value);
-            if (!Number.isFinite(opening) || opening < 0) {
-                showToast('Ingresa un fondo inicial válido para abrir la caja.');
+            const inputIds = { cash: 'openingCashInput', transfer: 'openingTransferInput', card: 'openingCardInput' };
+            if (!inputIds[medium]) return;
+            const openingValue = document.getElementById(inputIds[medium]).value.trim();
+            const opening = Number(openingValue);
+            if (openingValue === '' || !Number.isFinite(opening) || opening < 0 || !Number.isSafeInteger(Math.round(opening * 100))) {
+                showToast('Ingresa un saldo inicial válido para abrir la caja.');
                 return;
             }
-            cashRegister = { date: cashRegisterDate(), openingCash: opening, open: true };
-            await saveLocalState();
-            renderCashRegister();
-            showToast('Caja abierta correctamente.');
+            const openingCents = Math.round(opening * 100);
+            try {
+                await callSecureFunction('openRegister', { medium, openingCents });
+                secureRegisters[medium] = { open: true, balanceCents: openingCents, openingCents };
+                try {
+                    await refreshSecureRegisters();
+                } catch (error) {
+                    console.error('La caja se abrió, pero no se pudo refrescar su estado:', error);
+                    renderCashRegister();
+                    showToast('La caja se abrió en el backend, pero no se pudo refrescar el saldo.');
+                    return;
+                }
+                renderCashRegister();
+                showToast(`Caja de ${medium === 'cash' ? 'efectivo' : medium === 'transfer' ? 'transferencia' : 'tarjeta'} abierta.`);
+            } catch (error) {
+                console.error(`No se pudo abrir la caja ${medium}:`, error);
+                try {
+                    await refreshSecureRegisters();
+                } catch (refreshError) {
+                    console.error('No se pudo verificar el estado de la caja tras el error:', refreshError);
+                }
+                renderCashRegister();
+                showToast(error.message || 'No se pudo abrir la caja segura.');
+            }
         }
 
-        async function closeCashRegister() {
+        async function closeSecureRegister(medium) {
             if (!requireAdmin()) return;
-            if (cashRegister.date !== cashRegisterDate() || !cashRegister.open) {
+            if (!secureRegisters[medium]?.open) {
                 showToast('No hay una caja abierta para cerrar.');
                 return;
             }
-            const todaySales = SALES.filter(sale => sale.date.includes(cashRegisterDate()) && sale.status !== 'Anulada' && sale.status !== 'Pendiente de emisión' && sale.paymentMethod !== 'Cuenta corriente');
-            const cashSales = todaySales.reduce((sum, sale) => sum + (sale.paymentBreakdown?.cash || (sale.paymentMethod === 'Tarjeta/Cuotas' ? 0 : sale.total)), 0);
-            const expectedAmount = cashRegister.openingCash + cashSales;
-            const expected = `$${expectedAmount.toLocaleString('es-AR')}`;
-            const actual = window.prompt(`Efectivo real contado (esperado ${expected}):`, '0');
+            const expected = secureRegisters[medium].balanceCents / 100;
+            const actual = window.prompt(`Saldo contado (esperado $${expected.toLocaleString('es-AR')}):`, String(expected));
             if (actual === null) return;
-            const actualCash = parseFloat(actual);
-            if (!Number.isFinite(actualCash) || actualCash < 0) {
+            const counted = Number(actual);
+            if (!Number.isFinite(counted) || counted < 0 || !Number.isSafeInteger(Math.round(counted * 100))) {
                 showToast('Ingresa un importe contado válido.');
                 return;
             }
-            cashRegister = { ...cashRegister, open: false, closingCash: actualCash, closedAt: new Date().toISOString() };
-            await saveLocalState();
-            renderCashRegister();
-            showToast(`Caja cerrada. Diferencia: $${(actualCash - expectedAmount).toLocaleString('es-AR')}`);
+            const countedCents = Math.round(counted * 100);
+            try {
+                const result = await callSecureFunction('closeRegister', { medium, countedCents });
+                secureRegisters[medium] = {
+                    ...secureRegisters[medium],
+                    open: false,
+                    balanceCents: countedCents
+                };
+                try {
+                    await refreshSecureRegisters();
+                } catch (error) {
+                    console.error('La caja se cerró, pero no se pudo refrescar su estado:', error);
+                    renderCashRegister();
+                    showToast(`Caja cerrada. Diferencia: $${(result.differenceCents / 100).toLocaleString('es-AR')}. No se pudo refrescar el estado.`);
+                    return;
+                }
+                renderCashRegister();
+                showToast(`Caja cerrada. Diferencia: $${(result.differenceCents / 100).toLocaleString('es-AR')}`);
+            } catch (error) {
+                console.error(`No se pudo cerrar la caja ${medium}:`, error);
+                try {
+                    await refreshSecureRegisters();
+                } catch (refreshError) {
+                    console.error('No se pudo verificar el estado de la caja tras el error:', refreshError);
+                }
+                renderCashRegister();
+                showToast(error.message || 'No se pudo cerrar la caja segura.');
+            }
         }
 
         /* SALES HISTORY TABLE */
@@ -1274,8 +1421,8 @@ let IPHONE_TRADE_IN_RATES = [];
                         <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
                             <i class="fa-solid fa-receipt"></i>
                         </button>
-                        ${isAdmin() && sale.status !== 'Anulada' ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
-                        ${isAdmin() ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
+                        ${isAdmin() && sale.status !== 'Anulada' && !sale.backendTicketId && !sale.backendSubmissionStarted ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
+                        ${isAdmin() && !sale.backendTicketId ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
@@ -1285,6 +1432,10 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             const sale = SALES.find(item => item.id === saleId);
             if (!sale || sale.status === 'Anulada') return;
+            if (sale.backendTicketId) {
+                showToast('Esta venta está registrada en el backend seguro. Gestiona una devolución desde el flujo de devoluciones.');
+                return;
+            }
             if (sale.status === 'Pendiente de emisión') {
                 pendingSaleId = sale.id;
                 await cancelPendingSale();
@@ -1315,6 +1466,10 @@ let IPHONE_TRADE_IN_RATES = [];
 
         async function deleteSale(saleId) {
             if (!requireAdmin()) return;
+            if (SALES.find(item => item.id === saleId)?.backendTicketId) {
+                showToast('No se puede eliminar del historial una venta registrada en el backend seguro.');
+                return;
+            }
             SALES = SALES.filter(item => item.id !== saleId);
             await saveLocalState();
             renderSalesTable();
@@ -1325,7 +1480,12 @@ let IPHONE_TRADE_IN_RATES = [];
         function reprintReceipt(saleId) {
             const sale = SALES.find(s => s.id === saleId);
             if (sale) {
-                if (sale.status === 'Pendiente de emisión') pendingSaleId = sale.id;
+                if (sale.status === 'Pendiente de emisión') {
+                    pendingSaleId = sale.id;
+                    posOperationInProgress = true;
+                    const checkoutButton = document.getElementById('posCheckoutButton');
+                    checkoutButton.disabled = true;
+                }
                 openReceiptModal(sale);
             }
         }
@@ -1338,6 +1498,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 ${sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
                 <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
                 ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
+                ${sale.paymentVersion === 2 && sale.paymentMethod === 'Pago mixto' ? `<div><strong>Efectivo:</strong> $${sale.paymentBreakdown.cash.toLocaleString('es-AR')} · <strong>Transferencia:</strong> $${sale.paymentBreakdown.transfer.toLocaleString('es-AR')} · <strong>Tarjeta:</strong> $${sale.paymentBreakdown.card.toLocaleString('es-AR')}</div>` : ''}
             `;
 
             document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
@@ -1353,12 +1514,17 @@ let IPHONE_TRADE_IN_RATES = [];
             totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
-            document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión');
+            document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión' || sale.backendSubmissionStarted);
             document.getElementById('receiptModal').classList.remove('hidden');
         }
 
         function closeReceiptModal() {
             if (pendingSaleId) {
+                const sale = SALES.find(item => item.id === pendingSaleId);
+                if (sale?.backendSubmissionStarted) {
+                    showToast('La venta ya se envió al backend. Reintenta la emisión para confirmar el resultado antes de cerrarla.');
+                    return;
+                }
                 cancelPendingSale();
                 return;
             }
@@ -1368,19 +1534,111 @@ let IPHONE_TRADE_IN_RATES = [];
         async function finalizePendingSale(deliveryMethod) {
             const sale = SALES.find(item => item.id === pendingSaleId);
             if (!sale || sale.status !== 'Pendiente de emisión' || posOperationInProgress === false) return;
-            sale.status = 'Confirmada';
-            sale.deliveryMethod = deliveryMethod;
-            sale.items.forEach(item => {
-                if (item.type !== 'acc') return;
-                const product = PRODUCTS.find(productItem => productItem.id === item.id);
-                if (product?.stock === 0) product.status = 'Anulado';
-            });
-            await saveLocalState();
+            if (!sale.backendOperationId || !sale.backendPayment) {
+                showToast('Este comprobante pendiente es anterior a la integración segura. Cancélalo y registra nuevamente la venta.');
+                return false;
+            }
+            const request = {
+                operationId: sale.backendOperationId,
+                items: sale.items.map(item => ({ id: item.id, quantity: item.quantity })),
+                customerName: sale.customerName,
+                payment: sale.backendPayment
+            };
+            let backendCommitted = false;
+            sale.backendSubmissionStarted = true;
+            try {
+                const result = await callSecureFunction('recordSale', request);
+                backendCommitted = true;
+                if (!result || typeof result.ticketId !== 'string' || !Array.isArray(result.items) ||
+                    !Number.isSafeInteger(result.subtotalCents) || !Number.isSafeInteger(result.totalCents) || !result.payment) {
+                    throw new Error('El backend confirmó la venta con una respuesta inválida. Reintenta para recuperar el mismo ticket.');
+                }
+                const resultItemIds = result.items.map(item => item.id);
+                const paymentValues = [
+                    result.payment.cashCents,
+                    result.payment.transferCents,
+                    result.payment.cardBaseCents,
+                    result.payment.cardTotalCents,
+                    result.payment.cardNetCents
+                ];
+                if (result.items.length !== sale.items.length || new Set(resultItemIds).size !== sale.items.length ||
+                    result.items.some(item => typeof item.name !== 'string' || !item.name ||
+                        !Number.isSafeInteger(item.unitPriceCents) || !Number.isSafeInteger(item.stockAfter) || item.stockAfter < 0) ||
+                    paymentValues.some(value => !Number.isSafeInteger(value) || value < 0)) {
+                    throw new Error('El backend confirmó la venta con un detalle inválido. Reintenta para recuperar el mismo ticket.');
+                }
+                if (sale.items.some(item => !resultItemIds.includes(item.id))) {
+                    throw new Error('El backend confirmó la venta con un detalle que no coincide. Reintenta para recuperar el mismo ticket.');
+                }
+
+                sale.id = result.ticketId;
+                pendingSaleId = result.ticketId;
+                sale.backendTicketId = result.ticketId;
+                sale.items = sale.items.map(item => {
+                    const saved = result.items.find(entry => entry.id === item.id);
+                    if (!saved) throw new Error('El backend devolvió un detalle de venta incompleto.');
+                    if (item.type === 'acc') {
+                        const product = PRODUCTS.find(entry => entry.id === item.id);
+                        if (product) {
+                            product.stock = saved.stockAfter;
+                            product.status = product.stock > 0 ? 'Activo' : 'Anulado';
+                        }
+                    } else {
+                        const phone = PHONES.find(entry => entry.id === item.id);
+                        if (phone) phone.status = saved.stockAfter > 0 ? 'En Stock' : 'Vendido';
+                    }
+                    return {
+                        ...item,
+                        title: saved.name,
+                        price: saved.unitPriceCents / 100
+                    };
+                });
+                sale.subtotal = result.subtotalCents / 100;
+                sale.total = result.totalCents / 100;
+                sale.surcharge = Math.max(0, sale.total - sale.subtotal);
+                sale.paymentBreakdown = {
+                    cash: result.payment.cashCents / 100,
+                    transfer: result.payment.transferCents / 100,
+                    card: result.payment.cardTotalCents / 100
+                };
+                sale.cardPlan = result.payment.cardPlan || '';
+                sale.cardCommission = Math.max(0, result.payment.cardTotalCents - result.payment.cardNetCents) / 100;
+                sale.cardCommissionVat = 0;
+                sale.status = 'Confirmada';
+                sale.deliveryMethod = deliveryMethod;
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                const code = (error.code || '').replace(/^functions\//, '');
+                if (!backendCommitted && ['unauthenticated', 'permission-denied', 'invalid-argument', 'failed-precondition', 'not-found', 'already-exists'].includes(code)) {
+                    sale.backendSubmissionStarted = false;
+                }
+                sale.status = 'Pendiente de emisión';
+                pendingSaleId = sale.id;
+                try {
+                    await saveLocalState();
+                } catch (saveError) {
+                    console.error('No se pudo persistir el estado pendiente de la venta:', saveError);
+                }
+                console.error('No se pudo finalizar la venta segura:', error);
+                openReceiptModal(sale);
+                showToast(error.message || 'No se pudo confirmar la venta en el backend seguro. Reintenta antes de cancelarla.');
+                return false;
+            }
+
+            try {
+                await refreshSecureRegisters();
+            } catch (error) {
+                console.error('La venta quedó confirmada, pero no se pudo actualizar el estado visible de las cajas:', error);
+                showToast('Venta confirmada; no se pudo refrescar el saldo de las cajas.');
+            }
             pendingSaleId = null;
             posState.ticket = [];
             document.getElementById('posCanjeDeduction').value = '';
             document.getElementById('posCustomerName').value = '';
             document.getElementById('posCustomerPhone').value = '';
+            document.getElementById('mixedCashAmount').value = '';
+            document.getElementById('mixedTransferAmount').value = '';
+            document.getElementById('mixedCardAmount').value = '';
             posState.phoneConditionFilter = 'ALL';
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
@@ -1388,15 +1646,23 @@ let IPHONE_TRADE_IN_RATES = [];
             checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
             renderPOSTicket();
             renderDashboard();
+            renderAccTable();
+            renderPhonesTable();
+            renderPOSItemsGrid();
             renderSalesTable();
             renderCashRegister();
-            document.getElementById('receiptModal').classList.add('hidden');
+            openReceiptModal(sale);
             showToast('Venta confirmada y stock actualizado.');
+            return true;
         }
 
         async function cancelPendingSale() {
             const sale = SALES.find(item => item.id === pendingSaleId);
             if (!sale || sale.status !== 'Pendiente de emisión') return;
+            if (sale.backendSubmissionStarted) {
+                showToast('No se puede cancelar mientras el backend puede haber registrado la venta. Reintenta la emisión primero.');
+                return;
+            }
             sale.items.forEach(item => releasePOSItem(item.id, item.type, item.quantity));
             const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
             if (client) {
@@ -1422,12 +1688,17 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function printReceipt() {
+            if (pendingSaleId && !await finalizePendingSale('Impreso')) return;
             window.print();
-            if (pendingSaleId) await finalizePendingSale('Impreso');
         }
 
         async function sendReceiptViaWhatsApp() {
             if (!lastCreatedSale) return;
+            const popup = window.open('about:blank', '_blank');
+            if (pendingSaleId && !await finalizePendingSale('WhatsApp')) {
+                popup?.close();
+                return;
+            }
 
             let msg = 'BE STORE - COMPROBANTE DE COMPRA\n';
             msg += 'N Ticket: ' + lastCreatedSale.id + '\nFecha: ' + lastCreatedSale.date + '\nCliente: ' + lastCreatedSale.customerName + '\n\n';
@@ -1437,8 +1708,8 @@ let IPHONE_TRADE_IN_RATES = [];
             });
             msg += '\nTotal Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + '\n';
             msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + '\n\nGracias por elegir BE STORE! @bestoreok';
-            window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
-            if (pendingSaleId) await finalizePendingSale('WhatsApp');
+            if (popup) popup.location.href = 'https://wa.me/?text=' + encodeURIComponent(msg);
+            else showToast('El navegador bloqueó la ventana de WhatsApp. Permite ventanas emergentes para enviar el comprobante.');
         }
 
         /* PLAN CANJE ENGINE */
@@ -1670,20 +1941,169 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('cancelClientEditButton').classList.add('hidden');
         }
 
+        function escapeSupplierHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]);
+        }
+
+        function renderSuppliers() {
+            const body = document.getElementById('suppliersTableBody');
+            if (!body) return;
+            if (!isAdmin()) {
+                body.innerHTML = '';
+                return;
+            }
+
+            const query = (document.getElementById('supplierSearch')?.value || '').trim().toLocaleLowerCase('es-AR');
+            const visibleSuppliers = SUPPLIERS.filter(supplier =>
+                [supplier.name, supplier.taxId, supplier.contact, supplier.phone, supplier.email, supplier.address, supplier.notes]
+                    .some(value => String(value || '').toLocaleLowerCase('es-AR').includes(query))
+            );
+            body.innerHTML = visibleSuppliers.map(supplier => {
+                const name = escapeSupplierHtml(supplier.name);
+                const taxId = escapeSupplierHtml(supplier.taxId);
+                const contact = escapeSupplierHtml(supplier.contact);
+                const phone = escapeSupplierHtml(supplier.phone);
+                const email = escapeSupplierHtml(supplier.email);
+                const address = escapeSupplierHtml(supplier.address);
+                const notes = escapeSupplierHtml(supplier.notes);
+                const phoneLink = (supplier.phone || '').replace(/\D/g, '');
+                return `<tr class="border-b border-slate-100 align-top">
+                    <td class="p-3 font-semibold">${name}${taxId ? `<span class="block text-[10px] text-slate-500">${taxId}</span>` : ''}</td>
+                    <td class="p-3">${contact || '-'}</td>
+                    <td class="p-3">${phoneLink ? `<a href="https://wa.me/${encodeURIComponent(phoneLink)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-emerald-700 hover:underline">${phone}</a>` : phone || '-'}</td>
+                    <td class="p-3">${email ? `<a href="mailto:${email}" class="text-brand-700 hover:underline">${email}</a>` : '-'}</td>
+                    <td class="p-3">${address || '-'}${notes ? `<span class="block mt-1 text-[10px] text-slate-500 whitespace-pre-wrap">${notes}</span>` : ''}</td>
+                    <td class="p-3 text-center whitespace-nowrap">
+                        <button onclick="editSupplier('${supplier.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar proveedor" aria-label="Editar proveedor"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="deleteSupplier('${supplier.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-xs" title="Eliminar proveedor" aria-label="Eliminar proveedor"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>`;
+            }).join('') || `<tr><td colspan="6" class="p-6 text-center text-slate-400">${query ? 'No se encontraron proveedores con esa búsqueda.' : 'No hay proveedores registrados.'}</td></tr>`;
+        }
+
+        async function saveSupplier(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+
+            const supplierId = document.getElementById('supplierId').value;
+            const supplierData = {
+                name: document.getElementById('supplierName').value.trim(),
+                taxId: document.getElementById('supplierTaxId').value.trim(),
+                contact: document.getElementById('supplierContact').value.trim(),
+                phone: document.getElementById('supplierPhone').value.trim(),
+                email: document.getElementById('supplierEmail').value.trim(),
+                address: document.getElementById('supplierAddress').value.trim(),
+                notes: document.getElementById('supplierNotes').value.trim()
+            };
+            const normalizedTaxId = supplierData.taxId.replace(/[\s-]/g, '').toLocaleLowerCase('es-AR');
+            if (normalizedTaxId && SUPPLIERS.some(supplier =>
+                supplier.id !== supplierId &&
+                (supplier.taxId || '').replace(/[\s-]/g, '').toLocaleLowerCase('es-AR') === normalizedTaxId
+            )) {
+                showToast('Ya existe un proveedor con ese CUIT / identificación fiscal.');
+                return;
+            }
+
+            const existingIndex = SUPPLIERS.findIndex(supplier => supplier.id === supplierId);
+            if (existingIndex > -1) {
+                SUPPLIERS[existingIndex] = { ...SUPPLIERS[existingIndex], ...supplierData };
+            } else {
+                SUPPLIERS.push({ id: `SUP-${Date.now()}`, ...supplierData });
+            }
+            await saveLocalState();
+            cancelSupplierEdit();
+            renderSuppliers();
+            showToast(existingIndex > -1 ? 'Proveedor actualizado correctamente.' : 'Proveedor registrado correctamente.');
+        }
+
+        function editSupplier(supplierId) {
+            if (!requireAdmin()) return;
+            const supplier = SUPPLIERS.find(item => item.id === supplierId);
+            if (!supplier) return;
+            document.getElementById('supplierId').value = supplier.id;
+            document.getElementById('supplierName').value = supplier.name || '';
+            document.getElementById('supplierTaxId').value = supplier.taxId || '';
+            document.getElementById('supplierContact').value = supplier.contact || '';
+            document.getElementById('supplierPhone').value = supplier.phone || '';
+            document.getElementById('supplierEmail').value = supplier.email || '';
+            document.getElementById('supplierAddress').value = supplier.address || '';
+            document.getElementById('supplierNotes').value = supplier.notes || '';
+            document.getElementById('supplierFormTitle').textContent = 'Editar proveedor';
+            document.getElementById('supplierSubmitButton').textContent = 'Guardar cambios';
+            document.getElementById('cancelSupplierEditButton').classList.remove('hidden');
+            document.getElementById('supplierName').focus();
+        }
+
+        function cancelSupplierEdit() {
+            const form = document.getElementById('supplierForm');
+            if (!form) return;
+            form.reset();
+            document.getElementById('supplierId').value = '';
+            document.getElementById('supplierFormTitle').textContent = 'Proveedores';
+            document.getElementById('supplierSubmitButton').textContent = 'Registrar proveedor';
+            document.getElementById('cancelSupplierEditButton').classList.add('hidden');
+        }
+
+        async function deleteSupplier(supplierId) {
+            if (!requireAdmin()) return;
+            const supplier = SUPPLIERS.find(item => item.id === supplierId);
+            if (!supplier || !confirm(`¿Eliminar al proveedor "${supplier.name}"?`)) return;
+            SUPPLIERS = SUPPLIERS.filter(item => item.id !== supplierId);
+            await saveLocalState();
+            renderSuppliers();
+            showToast('Proveedor eliminado correctamente.');
+        }
+
         async function markPhoneSold(id) {
             if (!requireAdmin()) return;
             const phone = PHONES.find(item => item.id === id);
             if (!phone) return;
-            phone.status = 'Vendido';
-            await saveLocalState();
+            try {
+                await callSecureFunction('saveInventoryItem', {
+                    id: phone.id,
+                    name: [phone.brand, phone.model, phone.storage, phone.condition].filter(Boolean).join(' '),
+                    type: 'phone',
+                    active: false,
+                    stock: 0,
+                    priceCents: Math.round(phone.price * 100)
+                });
+                phone.status = 'Vendido';
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                console.error('No se pudo actualizar el celular en el inventario seguro:', error);
+                showToast(error.message || 'No se pudo actualizar el celular.');
+                return;
+            }
             renderPhonesTable();
             renderDashboard();
         }
 
         async function deletePhone(id) {
             if (!requireAdmin()) return;
-            PHONES = PHONES.filter(item => item.id !== id);
-            await saveLocalState();
+            const phone = PHONES.find(item => item.id === id);
+            if (!phone) return;
+            try {
+                await callSecureFunction('saveInventoryItem', {
+                    id: phone.id,
+                    name: [phone.brand, phone.model, phone.storage, phone.condition].filter(Boolean).join(' '),
+                    type: 'phone',
+                    active: false,
+                    stock: 0,
+                    priceCents: Math.round(phone.price * 100)
+                });
+                PHONES = PHONES.filter(item => item.id !== id);
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                console.error('No se pudo desactivar el celular en el inventario seguro:', error);
+                showToast(error.message || 'No se pudo eliminar el celular.');
+                return;
+            }
             renderPhonesTable();
             renderDashboard();
         }
@@ -1814,7 +2234,6 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             hideProductFeedback();
             document.getElementById('productForm').reset();
-            previewImageUrl('', 'prodImagePreview');
             document.getElementById('prodId').value = '';
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
             renderCaseSubcategoryOptions();
@@ -1827,83 +2246,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('productModal').classList.add('hidden');
         }
 
-        function openImageFilePicker(fileInputId) {
-            const fileInput = document.getElementById(fileInputId);
-            fileInput.value = '';
-            if (typeof fileInput.showPicker === 'function') {
-                try {
-                    fileInput.showPicker();
-                    return;
-                } catch (error) {
-                    console.warn('No se pudo abrir el selector nativo con showPicker:', error);
-                }
-            }
-            fileInput.click();
-        }
-
-        function previewSelectedImage(input, previewId) {
-            const preview = document.getElementById(previewId);
-            if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
-            const file = input.files?.[0];
-            if (!file) return previewImageUrl('', previewId);
-            const urlInputId = previewId === 'prodImagePreview' ? 'prodImage' : 'phoneImage';
-            document.getElementById(urlInputId).value = '';
-            const objectUrl = URL.createObjectURL(file);
-            preview.dataset.objectUrl = objectUrl;
-            preview.src = objectUrl;
-            preview.classList.remove('hidden');
-        }
-
-        function previewImageUrl(url, previewId) {
-            const preview = document.getElementById(previewId);
-            if (url) {
-                const fileInputId = previewId === 'prodImagePreview' ? 'prodImageFile' : 'phoneImageFile';
-                document.getElementById(fileInputId).value = '';
-            }
-            if (preview.dataset.objectUrl) {
-                URL.revokeObjectURL(preview.dataset.objectUrl);
-                delete preview.dataset.objectUrl;
-            }
-            if (url) {
-                preview.src = url;
-                preview.classList.remove('hidden');
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.add('hidden');
-            }
-        }
-
-        async function uploadProductImage(file, itemId) {
-            if (!file) return null;
-            if (!file.type.startsWith('image/')) throw new Error('Selecciona un archivo de imagen válido.');
-            if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
-            const userId = firebase.auth().currentUser?.uid;
-            if (!userId) throw new Error('Inicia sesión nuevamente para subir imágenes.');
-            if (storageUploadUnavailable) {
-                const error = new Error('Firebase Storage no está disponible en este proyecto.');
-                error.code = 'storage/bucket-not-found';
-                throw error;
-            }
-            const extension = file.name.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
-            const imageRef = imageStorage.ref(`product-images/${userId}/${itemId}-${Date.now()}.${extension}`);
-            try {
-                const snapshot = await imageRef.put(file, { contentType: file.type });
-                return await snapshot.ref.getDownloadURL();
-            } catch (error) {
-                if (error.code?.startsWith('storage/')) storageUploadUnavailable = true;
-                throw error;
-            }
-        }
-
         function getProductSaveErrorMessage(error) {
-            if (['storage/bucket-not-found', 'storage/no-default-bucket'].includes(error.code)) {
-                return 'Firebase Storage no está inicializado. Activa Storage en Firebase Console para cargar archivos; puedes pegar una URL mientras tanto.';
-            }
-            if (error.code?.startsWith('storage/') || /Firebase Storage has not been set up/i.test(error.message || '')) {
-                return `No se pudo subir la imagen a Firebase Storage (${error.code || 'error'}). Verifica que Storage esté inicializado y que sus reglas permitan la carga.`;
-            }
             if (['resource-exhausted', 'firestore/resource-exhausted'].includes(error.code)) {
-                return 'Firestore rechazó los datos por superar el límite de tamaño del documento. Guarda las imágenes en Storage y conserva solo sus URL.';
+                return 'Firestore rechazó los datos por superar el límite de tamaño del documento.';
             }
             if (['permission-denied', 'firestore/permission-denied'].includes(error.code)) {
                 return 'Firebase rechazó el guardado por permisos. Verifica que tu usuario tenga rol de administrador.';
@@ -1933,19 +2278,23 @@ let IPHONE_TRADE_IN_RATES = [];
             const cost = parseFloat(document.getElementById('prodCost').value) || 0;
             const price = parseFloat(document.getElementById('prodPrice').value) || 0;
             const cashPrice = price;
-            let image = document.getElementById('prodImage').value || 'https://placehold.co/400x400/1e293b/ffffff?text=BE+STORE';
-            const imageFile = document.getElementById('prodImageFile').files[0];
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
             const status = stock === 0 ? 'Anulado' : (existingIndex > -1 ? PRODUCTS[existingIndex].status || 'Activo' : 'Activo');
-            const productObj = { id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, image, barcode, status };
+            const productObj = { ...PRODUCTS[existingIndex], id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, barcode, status };
 
             const isUpdate = existingIndex > -1;
 
             try {
-                if (imageFile) image = await uploadProductImage(imageFile, id);
-                productObj.image = image;
+                await callSecureFunction('saveInventoryItem', {
+                    id,
+                    name: title,
+                    type: 'acc',
+                    active: status !== 'Anulado',
+                    stock,
+                    priceCents: Math.round(price * 100)
+                });
                 if (isUpdate) {
                     PRODUCTS[existingIndex] = productObj;
                 } else {
@@ -1962,7 +2311,6 @@ let IPHONE_TRADE_IN_RATES = [];
                     return;
                 }
                 document.getElementById('productForm').reset();
-                previewImageUrl('', 'prodImagePreview');
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
@@ -2007,9 +2355,6 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('prodCost').value = p.cost;
             document.getElementById('prodPrice').value = p.price;
             document.getElementById('prodCashPrice').value = p.cashPrice;
-            document.getElementById('prodImageFile').value = '';
-            document.getElementById('prodImage').value = p.image;
-            previewImageUrl(p.image, 'prodImagePreview');
             document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';
@@ -2020,13 +2365,26 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             const product = PRODUCTS.find(item => item.id === id);
             if (!product) return;
-            if (product.status === 'Anulado') {
+            const nextStatus = product.status === 'Anulado' ? 'Activo' : 'Anulado';
+            if (nextStatus === 'Activo') {
                 if (product.stock <= 0) return showToast('Repone stock antes de reactivar el producto.');
-                product.status = 'Activo';
-            } else {
-                product.status = 'Anulado';
             }
-            await saveLocalState();
+            try {
+                await callSecureFunction('saveInventoryItem', {
+                    id: product.id,
+                    name: product.title,
+                    type: 'acc',
+                    active: nextStatus === 'Activo',
+                    stock: product.stock,
+                    priceCents: Math.round(product.price * 100)
+                });
+                product.status = nextStatus;
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                console.error('No se pudo actualizar el estado seguro del producto:', error);
+                showToast(error.message || 'No se pudo actualizar el producto.');
+                return;
+            }
             renderDashboard();
             renderAccTable();
             showToast(product.status === 'Anulado' ? 'Producto anulado del catálogo.' : 'Producto reactivado en el catálogo.');
@@ -2036,9 +2394,25 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             const p = PRODUCTS.find(item => item.id === id);
             if (p) {
-                p.stock = Math.max(0, p.stock + amount);
-                p.status = p.stock === 0 ? 'Anulado' : 'Activo';
-                await saveLocalState();
+                const stock = Math.max(0, p.stock + amount);
+                const status = stock === 0 ? 'Anulado' : 'Activo';
+                try {
+                    await callSecureFunction('saveInventoryItem', {
+                        id: p.id,
+                        name: p.title,
+                        type: 'acc',
+                        active: status !== 'Anulado',
+                        stock,
+                        priceCents: Math.round(p.price * 100)
+                    });
+                    p.stock = stock;
+                    p.status = status;
+                    await saveLocalState({ throwOnRemoteError: true });
+                } catch (error) {
+                    console.error('No se pudo ajustar el stock seguro:', error);
+                    showToast(error.message || 'No se pudo ajustar el stock.');
+                    return;
+                }
                 renderDashboard();
                 renderAccTable();
                 showToast(`Stock actualizado para ${p.title}`);
@@ -2051,8 +2425,22 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!product) return;
             if (!confirm(`Se eliminará "${product.title}" del inventario. Las ventas registradas no se modificarán. ¿Continuar?`)) return;
 
-            PRODUCTS = PRODUCTS.filter(item => item.id !== id);
-            await saveLocalState();
+            try {
+                await callSecureFunction('saveInventoryItem', {
+                    id: product.id,
+                    name: product.title,
+                    type: 'acc',
+                    active: false,
+                    stock: product.stock,
+                    priceCents: Math.round(product.price * 100)
+                });
+                PRODUCTS = PRODUCTS.filter(item => item.id !== id);
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                console.error('No se pudo desactivar el artículo en el inventario seguro:', error);
+                showToast(error.message || 'No se pudo eliminar el producto.');
+                return;
+            }
             renderDashboard();
             renderAccTable();
             renderPOSCategories();
@@ -2065,7 +2453,6 @@ let IPHONE_TRADE_IN_RATES = [];
         function openPhoneModal() {
             if (!requireAdmin()) return;
             document.getElementById('phoneForm').reset();
-            previewImageUrl('', 'phoneImagePreview');
             document.getElementById('phoneId').value = '';
             document.getElementById('phoneModalTitle').textContent = 'Ingresar Unidad Smartphone';
             renderPhoneIssueOptions();
@@ -2164,8 +2551,6 @@ let IPHONE_TRADE_IN_RATES = [];
             const priceUsd = currency === 'USD' ? enteredPrice : null;
             const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const status = document.getElementById('phoneStatus').value;
-            let image = document.getElementById('phoneImage').value || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&auto=format&fit=crop&q=80';
-            const imageFile = document.getElementById('phoneImageFile').files[0];
             const issues = condition.includes('Usado') ? [...document.querySelectorAll('input[name="phoneIssues"]:checked')].map(input => input.value) : [];
 
             if (!validatePhoneImei()) {
@@ -2173,26 +2558,27 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            const phoneObj = { id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, image, issues };
             const existingIndex = PHONES.findIndex(p => p.id === id);
-
-            try {
-                if (imageFile) phoneObj.image = await uploadProductImage(imageFile, id);
-            } catch (error) {
-                showToast(error.message || 'No se pudo subir la imagen.');
-                return;
-            }
+            const phoneObj = { ...PHONES[existingIndex], id, brand, model, condition, battery, storage, color, imei, price, priceUsd, currency, status, issues };
 
             const isUpdate = existingIndex > -1;
-            if (isUpdate) {
-                PHONES[existingIndex] = phoneObj;
-            } else {
-                PHONES.push(phoneObj);
-            }
-
             try {
+                await callSecureFunction('saveInventoryItem', {
+                    id,
+                    name: [brand, model, storage, condition].filter(Boolean).join(' '),
+                    type: 'phone',
+                    active: status === 'En Stock',
+                    stock: status === 'En Stock' ? 1 : 0,
+                    priceCents: Math.round(price * 100)
+                });
+                if (isUpdate) {
+                    PHONES[existingIndex] = phoneObj;
+                } else {
+                    PHONES.push(phoneObj);
+                }
                 await saveLocalState({ throwOnRemoteError: true });
             } catch (error) {
+                console.error('No se pudo guardar el celular en el backend seguro:', error);
                 showToast(getProductSaveErrorMessage(error));
                 return;
             }
@@ -2222,9 +2608,6 @@ let IPHONE_TRADE_IN_RATES = [];
             updatePhonePriceLabel();
             updatePhoneConvertedPrice();
             document.getElementById('phoneStatus').value = ph.status;
-            document.getElementById('phoneImageFile').value = '';
-            document.getElementById('phoneImage').value = ph.image;
-            previewImageUrl(ph.image, 'phoneImagePreview');
 
             document.getElementById('phoneModalTitle').textContent = 'Editar Unidad Smartphone';
             document.getElementById('phoneModal').classList.remove('hidden');
@@ -2246,6 +2629,7 @@ let IPHONE_TRADE_IN_RATES = [];
             localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
             localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+            localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
             localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
             localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
             localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
@@ -2268,6 +2652,7 @@ let IPHONE_TRADE_IN_RATES = [];
                         phones: PHONES,
                         sales: SALES,
                         clients: CLIENTS,
+                        suppliers: SUPPLIERS,
                         categories: CATEGORIES,
                         caseSubcategories: CASE_SUBCATEGORIES,
                         phoneIssues: PHONE_ISSUES,
@@ -2299,6 +2684,8 @@ let IPHONE_TRADE_IN_RATES = [];
             if (s) try { SALES = JSON.parse(s); } catch(e){}
             const c = localStorage.getItem('bestore_internal_clients');
             if (c) try { CLIENTS = JSON.parse(c); } catch(e){}
+            const suppliers = localStorage.getItem('bestore_internal_suppliers');
+            if (suppliers) try { SUPPLIERS = JSON.parse(suppliers); } catch(e){}
             const cash = localStorage.getItem('bestore_internal_cash_register');
             if (cash) try { cashRegister = JSON.parse(cash); } catch(e){}
             const dollar = localStorage.getItem('bestore_internal_dollar_rate');
@@ -2318,6 +2705,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     PHONES = remoteState.phones || PHONES;
                     SALES = remoteState.sales || SALES;
                     CLIENTS = remoteState.clients || CLIENTS;
+                    SUPPLIERS = remoteState.suppliers || SUPPLIERS;
                     CATEGORIES = remoteState.categories || CATEGORIES;
                     CASE_SUBCATEGORIES = remoteState.caseSubcategories || CASE_SUBCATEGORIES;
                     PHONE_ISSUES = remoteState.phoneIssues || PHONE_ISSUES;
@@ -2328,19 +2716,20 @@ let IPHONE_TRADE_IN_RATES = [];
                     localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
                     localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
                     localStorage.setItem('bestore_internal_clients', JSON.stringify(CLIENTS));
+                    localStorage.setItem('bestore_internal_suppliers', JSON.stringify(SUPPLIERS));
                     localStorage.setItem('bestore_internal_cash_register', JSON.stringify(cashRegister));
                     localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
                     localStorage.setItem('bestore_internal_case_subcategories', JSON.stringify(CASE_SUBCATEGORIES));
                     localStorage.setItem('bestore_internal_phone_issues', JSON.stringify(PHONE_ISSUES));
-                } else {
-                    PRODUCTS = [];
-                    PHONES = [];
-                    SALES = [];
-                    CLIENTS = [];
-                    await saveLocalState();
+                } else if (snapshot.exists) {
+                    const error = new Error('La versión de datos en Firebase no es compatible. No se modificaron los datos; solicita una revisión antes de continuar.');
+                    error.code = 'state/incompatible-version';
+                    throw error;
                 }
             } catch (error) {
+                if (error.code === 'state/incompatible-version') throw error;
                 console.error('Firestore no disponible, se usara almacenamiento local:', error);
+                showToast('No se pudo consultar Firebase. Se muestran únicamente los datos guardados en este dispositivo.');
             }
         }
 
