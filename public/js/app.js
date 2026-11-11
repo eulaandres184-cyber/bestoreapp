@@ -244,7 +244,7 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             const token = await user.getIdTokenResult();
             currentUserProfile = { ...profile.data(), bestoreRole: token.claims.bestoreRole || null };
-            if (currentUserProfile.active !== true) {
+            if (currentUserProfile.active === false) {
                 await firebase.auth().signOut();
                 currentUserProfile = null;
                 showAuthMessage('Este usuario fue desactivado. Consulte a un administrador.');
