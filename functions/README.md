@@ -11,8 +11,12 @@ controlado de los clientes anteriores.
 
 - `saveInventoryItem`: alta o ajuste de artículos por un administrador, con
   auditoría. Los celulares individuales tienen stock máximo de una unidad.
-- `openRegister` y `closeRegister`: apertura y cierre independientes de las
-  cajas `cash`, `transfer` y `card`, exclusivamente por administradores.
+- `openAllRegisters` y `closeAllRegisters`: un administrador abre las tres
+  cajas `cash`, `transfer` y `card` en una transacción, con saldo inicial
+  independiente para cada una. El cierre también es conjunto y registra el
+  importe contado y la diferencia por medio. Si el estado quedó parcial, el
+  botón único cierra en una transacción todas las cajas que aún estén abiertas;
+  no se permite abrir solo una caja.
 - `recordSale`: venta con precios calculados desde `secure_inventory`, stock y
   cajas actualizados en una transacción, y ticket UUID. Cada reintento debe
   utilizar el mismo `operationId` UUID y la misma solicitud.
@@ -61,6 +65,18 @@ true` y el mismo `role`. Los usuarios deben renovar su token tras cambiar la
 claim. Los vendedores pueden registrar ventas, pero solo los administradores
 pueden ajustar el catálogo y abrir o cerrar cajas.
 
+Todos los usuarios activos con `admin` tanto en su custom claim como en su
+perfil tienen los mismos permisos administrativos del backend y la app; no hay
+una cuenta `BeStore` con privilegios adicionales por UID o nombre. Las cargas
+de imágenes no se usan actualmente en la app y Firebase Storage aún no está
+inicializado en el proyecto `be-store-app`.
+
+Las reglas locales de Storage validan claim, perfil y estado activo, y permiten
+escribir imágenes solo bajo `product-images/{uid}/{fileName}` (máximo 5 MB, tipo
+imagen). Antes de que tengan efecto en producción, un operador debe inicializar
+Firebase Storage en la consola del proyecto y luego desplegar las reglas. No
+configurar un bucket sin acordar su ubicación y costos.
+
 El alta y los cambios de rol desde la app usan `setUserRole`; la configuración
 del primer administrador se debe habilitar por un operador de confianza. Para
 asignar un rol a una cuenta activa existente
@@ -98,29 +114,54 @@ Las pruebas unitarias se ejecutan con:
 npm test --prefix functions
 ```
 
-La integración con Authentication, Firestore y Functions Emulator requiere Java
-y se ejecuta desde la raíz del proyecto con:
+La integración con Authentication, Firestore, Storage y Functions Emulator
+requiere Java y se ejecuta desde la raíz del proyecto con:
 
 ```sh
-firebase emulators:exec --project demo-bestore --only auth,firestore,functions "node functions/test/emulator-integration.js"
+firebase emulators:exec --project demo-bestore --only auth,firestore,storage,functions "node functions/test/emulator-integration.js"
 ```
 
-El 12/11/2026 pasaron las 21 pruebas unitarias y la integración de emuladores
-para permisos, inventario, cajas, vista previa, venta idempotente y devolución.
+El 12/11/2026 pasaron 23 pruebas unitarias del backend y la migración, 8
+pruebas de planes de tarjeta y la integración de emuladores para permisos,
+Storage, inventario, apertura/cierre conjunto de cajas, vista previa, venta
+idempotente y devolución.
 
-El 12/11/2026 también pasaron las 8 pruebas de planes de tarjeta. El chequeo de
-producción confirmó que `be-store-app.web.app` responde HTTP 200 y que las nueve
-Cloud Functions esperadas están activas en `us-central1` con Node.js 22. Las
-nueve rechazaron solicitudes HTTP sin autenticación. No se realizó una
-transacción real autenticada de venta o caja en producción; antes de operar, un
-administrador debe comprobar roles, inventario seguro y apertura/conciliación
-de las cajas.
+El 12/11/2026 se desplegaron Hosting y Functions en `be-store-app`. La interfaz
+publicada tiene un solo botón de apertura y uno de cierre; `openAllRegisters` y
+`closeAllRegisters` están activos en `us-central1` con Node.js 22. Los antiguos
+endpoints individuales `openRegister` y `closeRegister` fueron retirados. La
+validación HTTP sin credenciales recibió `UNAUTHENTICATED` en los endpoints
+nuevos y `404` en los endpoints retirados. No se abrieron ni cerraron cajas
+reales durante el despliegue. Antes de empezar la carga inicial, verificar el
+estado de producción con un administrador y confirmar apertura y saldos.
+
+Una vez desplegada y verificada la apertura/cierre conjunto, el paso siguiente
+es cargar los productos iniciales en el catálogo y confirmar que cada ajuste se
+sincronice con `secure_inventory` antes de venderlos.
+
+La integración también verifica las reglas locales de Storage: Admin activo
+puede cargar en su propia ruta, vendedor e Admin inactivo no, Admin no puede
+escribir en la ruta de otra cuenta y un segundo Admin activo tiene los mismos
+permisos. Firebase Storage aún no está inicializado en `be-store-app`, por lo
+que el intento de despliegue de reglas fue rechazado y no cambió producción.
+Si se habilita Storage, elegir primero la ubicación y revisar costos en la
+consola Firebase; después ejecutar:
+
+```sh
+firebase deploy --only storage --project be-store-app
+```
+
+El 12/11/2026 también pasaron las 8 pruebas de planes de tarjeta. Tras el
+despliegue, `be-store-app.web.app` respondió HTTP 200 y las nueve Cloud
+Functions esperadas aparecieron activas en `us-central1` con Node.js 22. No se
+realizó una transacción real autenticada de caja o venta en producción; antes
+de cargar el catálogo o vender, un administrador debe comprobar roles,
+inventario seguro y apertura/conciliación de las cajas.
 
 La vista previa de migración reportó 1 artículo elegible, 0 artículos omitidos
 y 0 ventas elegibles u omitidas. `--apply` encontró una marca completa para la
 misma versión del origen y no escribió datos en ese intento. El informe general
 de estado está en [INFORME-ESTADO-APLICACION-2026-11-12.txt](../INFORME-ESTADO-APLICACION-2026-11-12.txt).
-
 ## Migración del flujo anterior
 
 `migrate-legacy.js` copia los artículos sin incidencias a `secure_inventory` y

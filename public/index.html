@@ -267,33 +267,36 @@
 
                 <div class="custom-card p-5">
                     <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-cash-register text-emerald-600"></i> Cajas seguras</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Las tres cajas se abren y cierran juntas. Ingresa por separado el saldo inicial o el importe contado de cada medio.</p>
+                    <div class="flex flex-wrap gap-2 mt-4">
+                        <button id="openAllRegistersButton" onclick="openAllSecureRegisters()" class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-4 py-2.5 rounded-xl text-xs" disabled>Abrir las 3 cajas</button>
+                        <button id="closeAllRegistersButton" onclick="closeAllSecureRegisters()" class="bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-4 py-2.5 rounded-xl text-xs" disabled>Cerrar las 3 cajas</button>
+                    </div>
+                    <p id="allRegistersActionStatus" class="text-[11px] text-slate-500 mt-2" aria-live="polite">Consultando estado de las cajas…</p>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                         <div class="rounded-xl border border-slate-200 p-3 space-y-2">
                             <p class="font-bold text-xs">Efectivo</p>
                             <p id="cashRegisterStatus" class="text-[11px] text-slate-500">Estado sin consultar</p>
-                            <input id="openingCashInput" type="number" min="0" step="0.01" placeholder="Fondo inicial" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
-                            <div class="flex gap-2">
-                                <button onclick="openSecureRegister('cash')" class="flex-1 bg-emerald-600 text-white font-bold px-2 py-2 rounded-xl text-xs">Abrir</button>
-                                <button onclick="closeSecureRegister('cash')" class="flex-1 bg-slate-800 text-white font-bold px-2 py-2 rounded-xl text-xs">Cerrar</button>
-                            </div>
+                            <label for="openingCashInput" class="text-[10px] text-slate-500 block">Saldo inicial ($)</label>
+                            <input id="openingCashInput" type="number" min="0" step="0.01" placeholder="0,00" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
+                            <label for="countedCashInput" class="text-[10px] text-slate-500 block">Saldo contado al cierre ($)</label>
+                            <input id="countedCashInput" type="number" min="0" step="0.01" placeholder="Ingresar conteo" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
                         </div>
                         <div class="rounded-xl border border-slate-200 p-3 space-y-2">
                             <p class="font-bold text-xs">Transferencia</p>
                             <p id="transferRegisterStatus" class="text-[11px] text-slate-500">Estado sin consultar</p>
-                            <input id="openingTransferInput" type="number" min="0" step="0.01" value="0" placeholder="Saldo inicial" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
-                            <div class="flex gap-2">
-                                <button onclick="openSecureRegister('transfer')" class="flex-1 bg-emerald-600 text-white font-bold px-2 py-2 rounded-xl text-xs">Abrir</button>
-                                <button onclick="closeSecureRegister('transfer')" class="flex-1 bg-slate-800 text-white font-bold px-2 py-2 rounded-xl text-xs">Cerrar</button>
-                            </div>
+                            <label for="openingTransferInput" class="text-[10px] text-slate-500 block">Saldo inicial ($)</label>
+                            <input id="openingTransferInput" type="number" min="0" step="0.01" value="0" placeholder="0,00" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
+                            <label for="countedTransferInput" class="text-[10px] text-slate-500 block">Saldo contado al cierre ($)</label>
+                            <input id="countedTransferInput" type="number" min="0" step="0.01" placeholder="Ingresar conteo" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
                         </div>
                         <div class="rounded-xl border border-slate-200 p-3 space-y-2">
                             <p class="font-bold text-xs">Tarjeta</p>
                             <p id="cardRegisterStatus" class="text-[11px] text-slate-500">Estado sin consultar</p>
-                            <input id="openingCardInput" type="number" min="0" step="0.01" value="0" placeholder="Saldo inicial" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
-                            <div class="flex gap-2">
-                                <button onclick="openSecureRegister('card')" class="flex-1 bg-emerald-600 text-white font-bold px-2 py-2 rounded-xl text-xs">Abrir</button>
-                                <button onclick="closeSecureRegister('card')" class="flex-1 bg-slate-800 text-white font-bold px-2 py-2 rounded-xl text-xs">Cerrar</button>
-                            </div>
+                            <label for="openingCardInput" class="text-[10px] text-slate-500 block">Saldo inicial ($)</label>
+                            <input id="openingCardInput" type="number" min="0" step="0.01" value="0" placeholder="0,00" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
+                            <label for="countedCardInput" class="text-[10px] text-slate-500 block">Saldo contado al cierre ($)</label>
+                            <input id="countedCardInput" type="number" min="0" step="0.01" placeholder="Ingresar conteo" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
                         </div>
                     </div>
                     <div id="cashRegisterSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs"></div>

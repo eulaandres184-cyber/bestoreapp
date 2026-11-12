@@ -143,22 +143,36 @@ exports.saveInventoryItem = guarded(async request => {
     });
 });
 
-exports.openRegister = guarded(async request => {
-    const { medium, openingCents } = request.data || {};
-    assert(registers.includes(medium), 'Caja inválida.');
-    money(openingCents, 'Saldo inicial');
-    const registerRef = db.doc(`secure_registers/${medium}`);
+exports.openAllRegisters = guarded(async request => {
+    const openingCents = request.data?.openingCentsByMedium;
+    assert(openingCents && typeof openingCents === 'object', 'Indica el saldo inicial de las tres cajas.');
+    registers.forEach(medium => money(openingCents[medium], `Saldo inicial de ${medium}`));
+    const registerRefs = registers.map(medium => db.doc(`secure_registers/${medium}`));
     const profileRef = db.doc(`users/${request.auth.uid}`);
-    const sessionId = randomUUID();
     return db.runTransaction(async tx => {
-        const [profile, snapshot] = await Promise.all([tx.get(profileRef), tx.get(registerRef)]);
+        const [profile, ...snapshots] = await Promise.all([
+            tx.get(profileRef), ...registerRefs.map(ref => tx.get(ref))
+        ]);
         authorize(request, profile, true);
-        assert(!snapshot.exists || snapshot.data().open !== true, 'La caja ya está abierta.', 'failed-precondition');
-        const sessionRef = db.doc(`secure_register_sessions/${sessionId}`);
-        const session = { medium, openingCents, balanceCents: openingCents, open: true, openedBy: request.auth.uid, openedAt: FieldValue.serverTimestamp() };
-        tx.create(sessionRef, session);
-        tx.set(registerRef, { ...session, sessionId });
-        return { sessionId };
+        assert(snapshots.every(snapshot => !snapshot.exists || snapshot.data().open !== true),
+            'Las tres cajas deben estar cerradas para abrirlas juntas.', 'failed-precondition');
+        const sessionIds = {};
+        registers.forEach((medium, index) => {
+            const sessionId = randomUUID();
+            sessionIds[medium] = sessionId;
+            const sessionRef = db.doc(`secure_register_sessions/${sessionId}`);
+            const session = {
+                medium,
+                openingCents: openingCents[medium],
+                balanceCents: openingCents[medium],
+                open: true,
+                openedBy: request.auth.uid,
+                openedAt: FieldValue.serverTimestamp()
+            };
+            tx.create(sessionRef, session);
+            tx.set(registerRefs[index], { ...session, sessionId });
+        });
+        return { sessionIds };
     });
 });
 
@@ -181,21 +195,53 @@ exports.getRegisterStatus = guarded(async request => {
     }));
 });
 
-exports.closeRegister = guarded(async request => {
-    const { medium, countedCents } = request.data || {};
-    assert(registers.includes(medium), 'Caja inválida.');
-    money(countedCents, 'Saldo contado');
-    const registerRef = db.doc(`secure_registers/${medium}`);
+exports.closeAllRegisters = guarded(async request => {
+    const countedCentsByMedium = request.data?.countedCentsByMedium;
+    assert(countedCentsByMedium && typeof countedCentsByMedium === 'object',
+        'Indica el saldo contado de las cajas abiertas.');
+    Object.entries(countedCentsByMedium).forEach(([medium, amount]) => {
+        assert(registers.includes(medium), 'Caja inválida.');
+        money(amount, `Saldo contado de ${medium}`);
+    });
+    const registerRefs = registers.map(medium => db.doc(`secure_registers/${medium}`));
     const profileRef = db.doc(`users/${request.auth.uid}`);
     return db.runTransaction(async tx => {
-        const [profile, snapshot] = await Promise.all([tx.get(profileRef), tx.get(registerRef)]);
+        const [profile, ...snapshots] = await Promise.all([
+            tx.get(profileRef), ...registerRefs.map(ref => tx.get(ref))
+        ]);
         authorize(request, profile, true);
-        assert(snapshot.exists && snapshot.data().open === true, 'La caja no está abierta.', 'failed-precondition');
-        const current = snapshot.data();
-        const close = { open: false, countedCents, differenceCents: countedCents - current.balanceCents, closedBy: request.auth.uid, closedAt: FieldValue.serverTimestamp() };
-        tx.update(registerRef, close);
-        tx.update(db.doc(`secure_register_sessions/${current.sessionId}`), close);
-        return { expectedCents: current.balanceCents, differenceCents: close.differenceCents };
+        const openIndexes = snapshots
+            .map((snapshot, index) => snapshot.exists && snapshot.data().open === true ? index : -1)
+            .filter(index => index !== -1);
+        assert(openIndexes.length > 0, 'No hay cajas abiertas para cerrar.', 'failed-precondition');
+        const sessionRefs = openIndexes.map(index => {
+            const sessionId = snapshots[index].data().sessionId;
+            assert(typeof sessionId === 'string' && sessionId.length > 0,
+                `La caja ${registers[index]} no tiene una sesión válida.`, 'failed-precondition');
+            assert(Object.hasOwn(countedCentsByMedium, registers[index]),
+                `Indica el saldo contado de ${registers[index]}.`);
+            return db.doc(`secure_register_sessions/${sessionId}`);
+        });
+        const sessionSnapshots = await Promise.all(sessionRefs.map(ref => tx.get(ref)));
+        assert(sessionSnapshots.every(snapshot => snapshot.exists),
+            'Falta una sesión de caja; no se cerró ninguna caja.', 'failed-precondition');
+        const differences = {};
+        openIndexes.forEach((index, sessionIndex) => {
+            const medium = registers[index];
+            const current = snapshots[index].data();
+            const countedCents = countedCentsByMedium[medium];
+            const close = {
+                open: false,
+                countedCents,
+                differenceCents: countedCents - current.balanceCents,
+                closedBy: request.auth.uid,
+                closedAt: FieldValue.serverTimestamp()
+            };
+            differences[medium] = close.differenceCents;
+            tx.update(registerRefs[index], close);
+            tx.update(sessionRefs[sessionIndex], close);
+        });
+        return { differences, closedMedia: openIndexes.map(index => registers[index]) };
     });
 });
 

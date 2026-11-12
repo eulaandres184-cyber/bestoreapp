@@ -161,13 +161,76 @@ test('rechaza roles falsos, usuarios inactivos y cajas cerradas sin modificar st
     assert.equal(data.get('secure_inventory/A').stock, 1);
 });
 
-test('solo un administrador abre y cierra la caja', async () => {
+test('solo un administrador abre y cierra las tres cajas de forma conjunta', async () => {
     const { data, api, request } = fixture();
-    await assert.rejects(api.closeRegister(request('seller', 'seller', { medium: 'cash', countedCents: 0 })), error => error.code === 'permission-denied');
-    const result = await api.closeRegister(request('admin', 'admin', { medium: 'cash', countedCents: 20 }));
-    assert.equal(result.differenceCents, 20);
-    await api.openRegister(request('admin', 'admin', { medium: 'cash', openingCents: 500 }));
-    assert.equal(data.get('secure_registers/cash').balanceCents, 500);
+    for (const medium of ['cash', 'transfer', 'card']) {
+        const register = data.get(`secure_registers/${medium}`) || {};
+        data.set(`secure_registers/${medium}`, { ...register, open: false });
+    }
+
+    const openingCentsByMedium = { cash: 500, transfer: 200, card: 100 };
+    await assert.rejects(
+        api.openAllRegisters(request('seller', 'seller', { openingCentsByMedium })),
+        error => error.code === 'permission-denied'
+    );
+    const opened = await api.openAllRegisters(request('admin', 'admin', { openingCentsByMedium }));
+    for (const medium of ['cash', 'transfer', 'card']) {
+        const register = data.get(`secure_registers/${medium}`);
+        assert.equal(register.open, true);
+        assert.equal(register.balanceCents, openingCentsByMedium[medium]);
+        assert.equal(register.sessionId, opened.sessionIds[medium]);
+        assert.equal(data.get(`secure_register_sessions/${register.sessionId}`).open, true);
+    }
+
+    const countedCentsByMedium = { cash: 550, transfer: 180, card: 100 };
+    await assert.rejects(
+        api.closeAllRegisters(request('seller', 'seller', { countedCentsByMedium })),
+        error => error.code === 'permission-denied'
+    );
+    const closed = await api.closeAllRegisters(request('admin', 'admin', { countedCentsByMedium }));
+    assert.equal(JSON.stringify(closed.differences), JSON.stringify({ cash: 50, transfer: -20, card: 0 }));
+    for (const medium of ['cash', 'transfer', 'card']) {
+        const register = data.get(`secure_registers/${medium}`);
+        assert.equal(register.open, false);
+        assert.equal(register.countedCents, countedCentsByMedium[medium]);
+        assert.equal(data.get(`secure_register_sessions/${register.sessionId}`).open, false);
+    }
+});
+
+test('no abre por partes y permite cerrar juntas las cajas que aún estén abiertas', async () => {
+    const { data, api, request } = fixture();
+    const openingPayload = { openingCentsByMedium: { cash: 0, transfer: 0, card: 0 } };
+    await assert.rejects(
+        api.openAllRegisters(request('admin', 'admin', openingPayload)),
+        error => error.code === 'failed-precondition'
+    );
+    assert.equal(data.get('secure_registers/cash').open, true);
+    assert.equal(data.has('secure_registers/transfer'), false);
+    assert.equal(data.has('secure_registers/card'), false);
+
+    data.set('secure_registers/transfer', { open: true, sessionId: 'transfer-session', balanceCents: 10 });
+    data.set('secure_register_sessions/transfer-session', { open: true, balanceCents: 10 });
+    const closed = await api.closeAllRegisters(request('admin', 'admin', {
+        countedCentsByMedium: { cash: 0, transfer: 10 }
+    }));
+    assert.equal(JSON.stringify(closed.closedMedia), JSON.stringify(['cash', 'transfer']));
+    assert.equal(data.get('secure_registers/cash').open, false);
+    assert.equal(data.get('secure_registers/transfer').open, false);
+    assert.equal(data.has('secure_registers/card'), false);
+});
+
+test('no cierra ninguna caja si una sesión abierta no está disponible', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_registers/transfer', { open: true, sessionId: 'missing-session', balanceCents: 10 });
+    await assert.rejects(
+        api.closeAllRegisters(request('admin', 'admin', {
+            countedCentsByMedium: { cash: 0, transfer: 10 }
+        })),
+        error => error.code === 'failed-precondition'
+    );
+    assert.equal(data.get('secure_registers/cash').open, true);
+    assert.equal(data.get('secure_registers/transfer').open, true);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 0);
 });
 
 test('devolución repone opcionalmente, debita caja y es idempotente', async () => {

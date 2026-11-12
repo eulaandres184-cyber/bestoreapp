@@ -21,12 +21,20 @@ ESTADO VERIFICADO
 - Firebase Hosting: el sitio be-store-app.web.app responde HTTP 200 y entrega
   la página de BE STORE APP.
 - Cloud Functions: 9 de 9 funciones activas, en us-central1 y Node.js 22:
-  closeRegister, getRegisterStatus, listInventory, openRegister,
+  closeAllRegisters, getRegisterStatus, listInventory, openAllRegisters,
   previewLegacyMigration, recordReturn, recordSale, saveInventoryItem y
-  setUserRole.
-- Pruebas: 21 pruebas del backend y migración, 8 pruebas de planes de tarjeta,
-  y la integración con los emuladores de Authentication, Firestore y Functions
-  pasaron en la última ejecución.
+  setUserRole. Los endpoints antiguos openRegister y closeRegister ya fueron
+  retirados.
+- Firebase Hosting se volvió a desplegar. La página responde HTTP 200 e incluye
+  un único botón para abrir y otro para cerrar las tres cajas.
+- Los dos endpoints nuevos respondieron UNAUTHENTICATED sin credenciales y los
+  antiguos respondieron 404. No se modificaron saldos ni se realizó una
+  apertura/cierre real durante el despliegue.
+- Pruebas: 23 pruebas del backend y migración, 8 pruebas de planes de tarjeta,
+  y la integración con emuladores de Authentication, Firestore, Storage y
+  Functions pasaron en la última ejecución. Storage verificó carga para Admin
+  activo, denegación para vendedor/Admin inactivo, separación de rutas por UID
+  y permisos equivalentes al promover otro usuario a Admin.
 - Endpoints: las 9 funciones rechazaron solicitudes anónimas con
   UNAUTHENTICATED, como corresponde.
 - Migración: la vista previa de producción de la versión consultada encontró
@@ -41,8 +49,16 @@ FUNCIONALIDADES IMPLEMENTADAS
   categorías, clientes, proveedores, tablero, historial de ventas, POS y
   calculadora de canje.
 - Autenticación Firebase y roles admin/seller con custom claim y perfil activo.
+- Todos los usuarios Admin comparten los mismos permisos; no existe una cuenta
+  BeStore con privilegios adicionales por nombre o UID en el backend y la app.
+  Las reglas locales de Storage exigen claim, perfil activo y rol coincidente;
+  Storage aún no está inicializado en producción y la app no usa cargas de
+  imágenes.
 - Backend seguro para consulta y ajuste de inventario, apertura/cierre y
   consulta de cajas, ventas, devoluciones y vista previa/migración histórica.
+- Un botón abre las tres cajas juntas con saldo inicial por medio y otro cierra
+  todas las cajas abiertas, registrando conteo y diferencia en una transacción
+  atómica. Esta modalidad ya está desplegada.
 - El backend calcula precios y stock desde el inventario seguro; las ventas
   actualizan stock y cajas de forma transaccional y admiten reintentos
   idempotentes.
@@ -60,25 +76,26 @@ PENDIENTES Y SIGUIENTES PASOS
    de inventario y estado de caja. Para probar una venta o devolución, usar
    primero staging o artículos/cajas de prueba aprobados; no generar
    transacciones de prueba en producción sin autorización y conciliación.
-2. Confirmar con el administrador que las cajas requeridas están abiertas y
-   conciliadas antes de usar el POS seguro en operaciones reales.
-3. Revisar las reglas de Firebase Storage junto con la creación de perfiles.
-   La regla actual identifica admin por el campo role del perfil; debe
-   verificarse que exija también el estado activo y la custom claim, de forma
-   consistente con la autorización de Firestore y Cloud Functions.
-4. Mantener controlado el flujo antiguo: app_state/main y las colecciones
+2. Con un administrador, verificar el estado de las tres cajas y abrirlas con
+   los saldos iniciales reales. Luego iniciar la carga de datos del catálogo en
+   el inventario seguro.
+4. Si se decide habilitar cargas de imágenes, acordar ubicación y costos,
+   inicializar Firebase Storage en `be-store-app` y después desplegar sus reglas
+   con firebase deploy --only storage --project be-store-app. El intento actual
+   no se pudo aplicar porque Storage no está inicializado; producción no cambió.
+5. Mantener controlado el flujo antiguo: app_state/main y las colecciones
    secure_* son fuentes independientes. Evitar escrituras paralelas de clientes
    antiguos y nuevos, y definir el retiro del flujo viejo antes de depender
    exclusivamente del POS seguro.
-5. Si vuelve a requerirse una migración, obtener una nueva vista previa,
+6. Si vuelve a requerirse una migración, obtener una nueva vista previa,
    conciliar sus incidencias y confirmar el congelamiento del flujo anterior.
    La versión consultada no reportó tickets de venta para importar.
-6. Según lo acordado, siguen pospuestos: corrección/conciliación avanzada de
+7. Según lo acordado, siguen pospuestos: corrección/conciliación avanzada de
    medios de pago, cambios, cuenta corriente, plan canje integrado y emisión de
    comprobantes fiscales. Definir reglas de negocio y proveedor de facturación
    antes de habilitarlos. El ticket impreso de la app no equivale por sí solo a
    un comprobante fiscal.
-7. Actualizar este informe y el README después de completar cada paso o cambiar
+8. Actualizar este informe y el README después de completar cada paso o cambiar
    el estado de producción.
 
 LIMITACIONES DE ESTE CHEQUEO

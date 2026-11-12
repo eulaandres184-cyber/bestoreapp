@@ -143,6 +143,7 @@ let IPHONE_TRADE_IN_RATES = [];
             transfer: { open: false, balanceCents: 0, openingCents: 0 },
             card: { open: false, balanceCents: 0, openingCents: 0 }
         };
+        let secureRegistersLoaded = false;
         let dailyDollarRate = 0;
 
         let posState = {
@@ -1282,6 +1283,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 throw new Error('El backend devolvió el estado de cajas inválido.');
             }
             secureRegisters = statuses;
+            secureRegistersLoaded = true;
             renderSecureRegisterStatus();
         }
 
@@ -1294,6 +1296,23 @@ let IPHONE_TRADE_IN_RATES = [];
                     ? `Abierta · Saldo $${(register.balanceCents / 100).toLocaleString('es-AR')}`
                     : 'Caja cerrada';
             });
+            const states = Object.values(secureRegisters).map(register => register.open);
+            const allOpen = states.every(Boolean);
+            const allClosed = states.every(open => !open);
+            const anyOpen = states.some(Boolean);
+            const openButton = document.getElementById('openAllRegistersButton');
+            const closeButton = document.getElementById('closeAllRegistersButton');
+            const actionStatus = document.getElementById('allRegistersActionStatus');
+            if (!openButton || !closeButton || !actionStatus) return;
+            openButton.disabled = !secureRegistersLoaded || !isAdmin() || !allClosed;
+            closeButton.disabled = !secureRegistersLoaded || !isAdmin() || !anyOpen;
+            actionStatus.textContent = !secureRegistersLoaded
+                ? 'Consultando estado de las cajas…'
+                : allOpen
+                    ? 'Las tres cajas están abiertas.'
+                    : allClosed
+                        ? 'Las tres cajas están cerradas.'
+                        : 'Estado parcial: “Cerrar las 3 cajas” cerrará en una sola operación todas las cajas que sigan abiertas.';
         }
 
         function renderCashRegister() {
@@ -1311,83 +1330,84 @@ let IPHONE_TRADE_IN_RATES = [];
             `;
         }
 
-        async function openSecureRegister(medium) {
+        function parseRegisterAmounts(inputIds, message, requiredMediums = Object.keys(inputIds)) {
+            const amounts = {};
+            for (const medium of requiredMediums) {
+                const inputId = inputIds[medium];
+                const rawValue = document.getElementById(inputId).value.trim();
+                const value = Number(rawValue);
+                if (rawValue === '' || !Number.isFinite(value) || value < 0 || !Number.isSafeInteger(Math.round(value * 100))) {
+                    showToast(message);
+                    return null;
+                }
+                amounts[medium] = Math.round(value * 100);
+            }
+            return amounts;
+        }
+
+        async function openAllSecureRegisters() {
             if (!requireAdmin()) return;
             const inputIds = { cash: 'openingCashInput', transfer: 'openingTransferInput', card: 'openingCardInput' };
-            if (!inputIds[medium]) return;
-            const openingValue = document.getElementById(inputIds[medium]).value.trim();
-            const opening = Number(openingValue);
-            if (openingValue === '' || !Number.isFinite(opening) || opening < 0 || !Number.isSafeInteger(Math.round(opening * 100))) {
-                showToast('Ingresa un saldo inicial válido para abrir la caja.');
-                return;
-            }
-            const openingCents = Math.round(opening * 100);
+            const openingCentsByMedium = parseRegisterAmounts(inputIds, 'Ingresa un saldo inicial válido para cada caja.');
+            if (!openingCentsByMedium) return;
             try {
-                await callSecureFunction('openRegister', { medium, openingCents });
-                secureRegisters[medium] = { open: true, balanceCents: openingCents, openingCents };
+                await callSecureFunction('openAllRegisters', { openingCentsByMedium });
                 try {
                     await refreshSecureRegisters();
                 } catch (error) {
-                    console.error('La caja se abrió, pero no se pudo refrescar su estado:', error);
+                    console.error('Las cajas se abrieron, pero no se pudo refrescar su estado:', error);
                     renderCashRegister();
-                    showToast('La caja se abrió en el backend, pero no se pudo refrescar el saldo.');
+                    showToast('Las tres cajas se abrieron, pero no se pudo refrescar el saldo.');
                     return;
                 }
                 renderCashRegister();
-                showToast(`Caja de ${medium === 'cash' ? 'efectivo' : medium === 'transfer' ? 'transferencia' : 'tarjeta'} abierta.`);
+                showToast('Las tres cajas se abrieron correctamente.');
             } catch (error) {
-                console.error(`No se pudo abrir la caja ${medium}:`, error);
+                console.error('No se pudieron abrir las tres cajas:', error);
                 try {
                     await refreshSecureRegisters();
                 } catch (refreshError) {
-                    console.error('No se pudo verificar el estado de la caja tras el error:', refreshError);
+                    console.error('No se pudo verificar el estado de las cajas tras el error:', refreshError);
                 }
                 renderCashRegister();
-                showToast(error.message || 'No se pudo abrir la caja segura.');
+                showToast(error.message || 'No se pudieron abrir las tres cajas.');
             }
         }
 
-        async function closeSecureRegister(medium) {
+        async function closeAllSecureRegisters() {
             if (!requireAdmin()) return;
-            if (!secureRegisters[medium]?.open) {
-                showToast('No hay una caja abierta para cerrar.');
-                return;
-            }
-            const expected = secureRegisters[medium].balanceCents / 100;
-            const actual = window.prompt(`Saldo contado (esperado $${expected.toLocaleString('es-AR')}):`, String(expected));
-            if (actual === null) return;
-            const counted = Number(actual);
-            if (!Number.isFinite(counted) || counted < 0 || !Number.isSafeInteger(Math.round(counted * 100))) {
-                showToast('Ingresa un importe contado válido.');
-                return;
-            }
-            const countedCents = Math.round(counted * 100);
+            const inputIds = { cash: 'countedCashInput', transfer: 'countedTransferInput', card: 'countedCardInput' };
+            const openMediums = Object.keys(inputIds).filter(medium => secureRegisters[medium]?.open);
+            const countedCentsByMedium = parseRegisterAmounts(
+                inputIds,
+                'Ingresa el saldo contado válido de cada caja abierta.',
+                openMediums
+            );
+            if (!countedCentsByMedium) return;
             try {
-                const result = await callSecureFunction('closeRegister', { medium, countedCents });
-                secureRegisters[medium] = {
-                    ...secureRegisters[medium],
-                    open: false,
-                    balanceCents: countedCents
-                };
+                const result = await callSecureFunction('closeAllRegisters', { countedCentsByMedium });
                 try {
                     await refreshSecureRegisters();
                 } catch (error) {
-                    console.error('La caja se cerró, pero no se pudo refrescar su estado:', error);
+                    console.error('Las cajas se cerraron, pero no se pudo refrescar su estado:', error);
                     renderCashRegister();
-                    showToast(`Caja cerrada. Diferencia: $${(result.differenceCents / 100).toLocaleString('es-AR')}. No se pudo refrescar el estado.`);
+                    showToast('Las tres cajas se cerraron, pero no se pudo refrescar el estado.');
                     return;
                 }
                 renderCashRegister();
-                showToast(`Caja cerrada. Diferencia: $${(result.differenceCents / 100).toLocaleString('es-AR')}`);
+                const differences = Object.entries(result.differences)
+                    .map(([medium, cents]) => `${medium}: $${(cents / 100).toLocaleString('es-AR')}`)
+                    .join(' · ');
+                showToast(`Cajas cerradas: ${result.closedMedia.join(', ')}. Diferencias: ${differences}`);
             } catch (error) {
-                console.error(`No se pudo cerrar la caja ${medium}:`, error);
+                console.error('No se pudieron cerrar las tres cajas:', error);
                 try {
                     await refreshSecureRegisters();
                 } catch (refreshError) {
-                    console.error('No se pudo verificar el estado de la caja tras el error:', refreshError);
+                    console.error('No se pudo verificar el estado de las cajas tras el error:', refreshError);
                 }
                 renderCashRegister();
-                showToast(error.message || 'No se pudo cerrar la caja segura.');
+                showToast(error.message || 'No se pudieron cerrar las tres cajas.');
             }
         }
 
