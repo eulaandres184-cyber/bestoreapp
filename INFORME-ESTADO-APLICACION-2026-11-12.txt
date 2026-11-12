@@ -68,6 +68,25 @@ FUNCIONALIDADES IMPLEMENTADAS
 - Migración idempotente de artículos válidos e importes/tickets históricos
   limpios, con comprobación del origen, conflictos y confirmación de
   congelamiento.
+- La lista de precios se revisó sin modificar el XLSX fuente. El 12/11/2026 se
+  cargaron en Firebase `be-store-app` 107 artículos no telefónicos con precio efectivo
+  positivo, usando el nombre de cada hoja no excluida como categoría. Se
+  añadieron 11 categorías y se reutilizaron 3 existentes. Los 107 artículos se
+  guardaron en `app_state/main` y `secure_inventory`, cada uno con auditoría; el
+  artículo que ya existía se conservó. La verificación confirmó 107 registros
+  importados en cada colección y precios coincidentes.
+- Todo el stock importado quedó en 0 e inactivo (`Anulado` en el catálogo)
+  hasta el conteo físico. El costo de compra no se informó porque el XLSX solo
+  contenía precios de venta. Se excluyeron las hojas Samsung, Motorola, iPhone,
+  Usados y Xiaomi, así como los precios efectivos 0,00 y dos filas de accesorios
+  sin precio efectivo identificable. Los valores USD y de tarjeta son solo
+  referencias y no se importaron.
+- La plantilla PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx sigue disponible para
+  registrar el conteo: 107 accesorios y 88 modelos de celulares con precio
+  positivo, 100 productos nombrados a precio cero separados y 3 filas por
+  revisar. La revisión directa corrige el conteo preliminar de 101 productos a
+  precio cero: se verificaron 100 filas nombradas. Los teléfonos permanecen
+  fuera de la carga.
 
 PENDIENTES Y SIGUIENTES PASOS
 
@@ -77,8 +96,11 @@ PENDIENTES Y SIGUIENTES PASOS
    primero staging o artículos/cajas de prueba aprobados; no generar
    transacciones de prueba en producción sin autorización y conciliación.
 2. Con un administrador, verificar el estado de las tres cajas y abrirlas con
-   los saldos iniciales reales. Luego iniciar la carga de datos del catálogo en
-   el inventario seguro.
+   los saldos iniciales reales. Completar el conteo físico en
+   PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx y actualizar las existencias de los
+   artículos cargados mediante la app; verificar que cada ajuste se refleje en
+   `secure_inventory`. Resolver las filas de accesorios sin precio antes de
+   darlas de alta. Los modelos de celulares continúan excluidos de este sistema.
 4. Si se decide habilitar cargas de imágenes, acordar ubicación y costos,
    inicializar Firebase Storage en `be-store-app` y después desplegar sus reglas
    con firebase deploy --only storage --project be-store-app. El intento actual

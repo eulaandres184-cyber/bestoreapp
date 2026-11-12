@@ -132,12 +132,44 @@ publicada tiene un solo botón de apertura y uno de cierre; `openAllRegisters` y
 endpoints individuales `openRegister` y `closeRegister` fueron retirados. La
 validación HTTP sin credenciales recibió `UNAUTHENTICATED` en los endpoints
 nuevos y `404` en los endpoints retirados. No se abrieron ni cerraron cajas
-reales durante el despliegue. Antes de empezar la carga inicial, verificar el
-estado de producción con un administrador y confirmar apertura y saldos.
+reales durante el despliegue. Antes de operar la caja, un administrador debe
+verificar su estado y confirmar los saldos.
 
-Una vez desplegada y verificada la apertura/cierre conjunto, el paso siguiente
-es cargar los productos iniciales en el catálogo y confirmar que cada ajuste se
-sincronice con `secure_inventory` antes de venderlos.
+## Preparación del conteo inicial de stock
+
+Se revisó `LISTA BE STORE.xlsx` sin modificar el original ni escribir datos en
+Firebase. Se preparó
+[PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx](../PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx)
+con 107 accesorios con precio efectivo positivo, 88 modelos de teléfonos con
+precio efectivo positivo, 100 productos nombrados con precio efectivo 0,00
+separados como discontinuados y 3 filas que requieren revisión. La revisión
+directa del archivo corrige el conteo preliminar de 101 productos a precio cero:
+se encontraron 100 filas nombradas con precio efectivo 0,00.
+
+Las cantidades quedaron en blanco en la plantilla para completarlas durante el
+conteo físico. Los precios de tarjeta y USD son referencias, no precios de alta;
+el POS calcula las cuotas según el plan vigente.
+Los teléfonos se separaron porque cada unidad requiere su propia ficha con
+IMEI/serie y características. No se cargó inventario en la aplicación ni en
+Firebase en esa etapa de preparación.
+
+El 12/11/2026 se cargaron en producción `be-store-app` 107 artículos no
+telefónicos con precio efectivo positivo, tomando cada hoja no excluida como
+categoría. Se añadieron 11 categorías y se reutilizaron 3 ya existentes. Los
+artículos quedaron tanto en `app_state/main` como en `secure_inventory`, con
+una entrada de auditoría por artículo; el artículo que ya existía se conservó.
+El stock quedó en 0 y los artículos inactivos (`Anulado` en el catálogo) hasta
+realizar el conteo físico.
+El costo de compra se dejó sin informar porque el XLSX solo contiene precios de
+venta. Se verificaron 107 registros en cada colección y que los precios
+coincidan entre ambos inventarios.
+
+Se excluyeron las hojas `SAMSUNG`, `MOTOROLA`, `IPHONEs`, `USADOS` y `XIAOMI`,
+los productos con precio efectivo 0,00 y las filas sin precio efectivo
+identificable. Los precios de tarjeta y USD no se cargaron. Los registros
+ambiguos deben resolverse aparte. Antes de vender o habilitar artículos,
+completar el conteo físico y ajustar existencias mediante la app, que sincroniza
+cambios con `secure_inventory`.
 
 La integración también verifica las reglas locales de Storage: Admin activo
 puede cargar en su propia ruta, vendedor e Admin inactivo no, Admin no puede
