@@ -2,9 +2,10 @@
 
 Este backend es la fuente segura para nuevas ventas simples. La aplicación ya
 consulta el inventario/cajas seguros, sincroniza los ajustes de catálogo y
-registra ventas desde el POS. No desplegarlo como reemplazo completo del flujo
-anterior hasta completar la migración de inventario, congelar las operaciones
-antiguas y ejecutar las pruebas con el emulador.
+registra ventas desde el POS y está desplegado. No considerarlo todavía
+reemplazo completo del flujo anterior: mantener separadas las operaciones
+antiguas hasta verificar la operación autenticada, la conciliación y el retiro
+controlado de los clientes anteriores.
 
 ## Alcance actual
 
@@ -107,21 +108,18 @@ firebase emulators:exec --project demo-bestore --only auth,firestore,functions "
 El 12/11/2026 pasaron las 21 pruebas unitarias y la integración de emuladores
 para permisos, inventario, cajas, vista previa, venta idempotente y devolución.
 
-En `be-store-app`, la vista previa de migración reportó 1 artículo elegible,
-0 artículos omitidos y 0 ventas elegibles u omitidas. La ejecución autorizada
-de `--apply` encontró una marca completa para la misma versión del origen y no
-escribió datos. `firebase functions:list` no reportó funciones desplegadas.
-El despliegue fue bloqueado porque el proyecto no está en el plan Blaze. No
-actualizar el plan ni habilitar facturación sin autorización explícita.
-Cuando el proyecto tenga un plan compatible, desplegar con:
+El 12/11/2026 también pasaron las 8 pruebas de planes de tarjeta. El chequeo de
+producción confirmó que `be-store-app.web.app` responde HTTP 200 y que las nueve
+Cloud Functions esperadas están activas en `us-central1` con Node.js 22. Las
+nueve rechazaron solicitudes HTTP sin autenticación. No se realizó una
+transacción real autenticada de venta o caja en producción; antes de operar, un
+administrador debe comprobar roles, inventario seguro y apertura/conciliación
+de las cajas.
 
-```sh
-firebase deploy --only functions --project be-store-app
-```
-
-Hasta completar el despliegue, las ventas nuevas siguen sin backend disponible.
-Después del despliegue, un administrador también debe abrir las cajas necesarias
-antes de vender.
+La vista previa de migración reportó 1 artículo elegible, 0 artículos omitidos
+y 0 ventas elegibles u omitidas. `--apply` encontró una marca completa para la
+misma versión del origen y no escribió datos en ese intento. El informe general
+de estado está en [INFORME-ESTADO-APLICACION-2026-11-12.txt](../INFORME-ESTADO-APLICACION-2026-11-12.txt).
 
 ## Migración del flujo anterior
 
@@ -161,10 +159,10 @@ cambia, el proceso se detiene para revisión manual. El comando usa el Admin SDK
 y requiere permisos para leer `app_state/main` y escribir las colecciones
 `secure_*`.
 
-La integración del POS simple y el cambio de roles están en el código, pero no
-se desplegaron. La migración ya tiene una marca completa para la versión actual
-de `app_state/main`; los tickets históricos no están disponibles en esta versión
-de origen. Aun después del despliegue, las ventas requieren cajas abiertas.
+La integración del POS simple y el cambio de roles están desplegados. La
+migración tiene una marca completa para la versión consultada de `app_state/main`;
+la vista previa no encontró tickets históricos en esa versión. Las ventas
+requieren inventario seguro y cajas abiertas.
 
 La vista previa de producción no encontró tickets antiguos, por lo que no había
 pagos ni devoluciones históricas que conciliar en esa versión del origen.

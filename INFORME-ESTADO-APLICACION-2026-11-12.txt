@@ -1,0 +1,89 @@
+INFORME GENERAL - BE STORE APP
+Fecha: 12 de noviembre de 2026
+
+RESUMEN EJECUTIVO
+
+La aplicación está publicada en Firebase Hosting y el backend seguro está
+desplegado en producción. La URL pública responde HTTP 200 y las nueve Cloud
+Functions esperadas aparecen activas en us-central1 con runtime Node.js 22.
+Las pruebas unitarias y de integración con emuladores pasan.
+
+El estado general es operativo, pero la verificación de producción es parcial:
+no se hizo una operación real autenticada de venta, devolución o caja. Las
+pruebas HTTP sin credenciales respondieron UNAUTHENTICATED, lo cual confirma el
+bloqueo de acceso anónimo, no el funcionamiento completo de una sesión real.
+
+ESTADO VERIFICADO
+
+- Git: main local coincide con origin/main en el commit
+  67e6914f8d6e8954fd6e0d779b22273e3e5cdac9. El árbol de trabajo estaba limpio
+  al verificarlo.
+- Firebase Hosting: el sitio be-store-app.web.app responde HTTP 200 y entrega
+  la página de BE STORE APP.
+- Cloud Functions: 9 de 9 funciones activas, en us-central1 y Node.js 22:
+  closeRegister, getRegisterStatus, listInventory, openRegister,
+  previewLegacyMigration, recordReturn, recordSale, saveInventoryItem y
+  setUserRole.
+- Pruebas: 21 pruebas del backend y migración, 8 pruebas de planes de tarjeta,
+  y la integración con los emuladores de Authentication, Firestore y Functions
+  pasaron en la última ejecución.
+- Endpoints: las 9 funciones rechazaron solicitudes anónimas con
+  UNAUTHENTICATED, como corresponde.
+- Migración: la vista previa de producción de la versión consultada encontró
+  1 artículo elegible, 0 artículos omitidos y 0 ventas elegibles u omitidas.
+  La ejecución de aplicación encontró un marcador completo para esa misma
+  versión y no escribió datos en ese intento. El estado original app_state/main
+  se conserva.
+
+FUNCIONALIDADES IMPLEMENTADAS
+
+- Aplicación web instalable (PWA) con módulos de inventario, celulares,
+  categorías, clientes, proveedores, tablero, historial de ventas, POS y
+  calculadora de canje.
+- Autenticación Firebase y roles admin/seller con custom claim y perfil activo.
+- Backend seguro para consulta y ajuste de inventario, apertura/cierre y
+  consulta de cajas, ventas, devoluciones y vista previa/migración histórica.
+- El backend calcula precios y stock desde el inventario seguro; las ventas
+  actualizan stock y cajas de forma transaccional y admiten reintentos
+  idempotentes.
+- Pagos de ventas nuevas con efectivo, transferencia, tarjeta y combinaciones
+  mixtas. Devoluciones disponibles para ventas nuevas con desglose manual y
+  opción de reponer cada artículo.
+- Migración idempotente de artículos válidos e importes/tickets históricos
+  limpios, con comprobación del origen, conflictos y confirmación de
+  congelamiento.
+
+PENDIENTES Y SIGUIENTES PASOS
+
+1. Hacer una prueba funcional autenticada en producción con cuentas autorizadas
+   de vendedor y administrador. Verificar inicio de sesión, permisos, lectura
+   de inventario y estado de caja. Para probar una venta o devolución, usar
+   primero staging o artículos/cajas de prueba aprobados; no generar
+   transacciones de prueba en producción sin autorización y conciliación.
+2. Confirmar con el administrador que las cajas requeridas están abiertas y
+   conciliadas antes de usar el POS seguro en operaciones reales.
+3. Revisar las reglas de Firebase Storage junto con la creación de perfiles.
+   La regla actual identifica admin por el campo role del perfil; debe
+   verificarse que exija también el estado activo y la custom claim, de forma
+   consistente con la autorización de Firestore y Cloud Functions.
+4. Mantener controlado el flujo antiguo: app_state/main y las colecciones
+   secure_* son fuentes independientes. Evitar escrituras paralelas de clientes
+   antiguos y nuevos, y definir el retiro del flujo viejo antes de depender
+   exclusivamente del POS seguro.
+5. Si vuelve a requerirse una migración, obtener una nueva vista previa,
+   conciliar sus incidencias y confirmar el congelamiento del flujo anterior.
+   La versión consultada no reportó tickets de venta para importar.
+6. Según lo acordado, siguen pospuestos: corrección/conciliación avanzada de
+   medios de pago, cambios, cuenta corriente, plan canje integrado y emisión de
+   comprobantes fiscales. Definir reglas de negocio y proveedor de facturación
+   antes de habilitarlos. El ticket impreso de la app no equivale por sí solo a
+   un comprobante fiscal.
+7. Actualizar este informe y el README después de completar cada paso o cambiar
+   el estado de producción.
+
+LIMITACIONES DE ESTE CHEQUEO
+
+Este informe confirma publicación, estado de despliegue, respuesta HTTP,
+protección frente a solicitudes anónimas y pruebas automatizadas. No verifica
+una sesión real de usuario, movimientos reales de caja, ventas/devoluciones en
+producción, facturación fiscal ni la operación diaria del negocio.
