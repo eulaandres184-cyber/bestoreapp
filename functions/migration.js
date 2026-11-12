@@ -1,8 +1,22 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
+
 function cents(value) {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isSafeInteger(Math.round(value * 100))) return null;
     return Math.round(value * 100);
+}
+
+function removeUndefined(value) {
+    if (Array.isArray(value)) return value.map(entry => entry === undefined ? null : removeUndefined(entry));
+    if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) return value;
+    return Object.fromEntries(Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, removeUndefined(entry)]));
+}
+
+function migrationSourceHash(state) {
+    return createHash('sha256').update(JSON.stringify(state)).digest('hex');
 }
 
 function previewMigration(state) {
@@ -49,4 +63,37 @@ function previewMigration(state) {
     return { inventory, sales, inventoryIssues: inventory.filter(item => item.issues.length).length, saleIssues: sales.filter(sale => sale.issues.length).length };
 }
 
-module.exports = { previewMigration };
+function planMigration(state) {
+    const preview = previewMigration(state);
+    const inventory = preview.inventory.flatMap(entry => {
+        if (entry.issues.length) return [];
+        return [{
+            id: entry.id,
+            data: {
+                id: entry.id,
+                name: entry.name,
+                type: entry.type,
+                active: entry.active,
+                stock: entry.stock,
+                priceCents: entry.priceCents
+            }
+        }];
+    });
+    const legacySales = preview.sales.flatMap((entry, index) => {
+        if (entry.issues.length) return [];
+        const sale = state.sales[index];
+        return [{
+            id: createHash('sha256').update(entry.id).digest('hex'),
+            legacyTicketId: entry.id,
+            data: removeUndefined(sale)
+        }];
+    });
+    return {
+        inventory,
+        legacySales,
+        skippedInventory: preview.inventoryIssues,
+        skippedSales: preview.saleIssues
+    };
+}
+
+module.exports = { migrationSourceHash, planMigration, previewMigration };

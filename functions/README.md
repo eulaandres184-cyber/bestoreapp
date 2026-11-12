@@ -61,9 +61,8 @@ claim. Los vendedores pueden registrar ventas, pero solo los administradores
 pueden ajustar el catálogo y abrir o cerrar cajas.
 
 El alta y los cambios de rol desde la app usan `setUserRole`; la configuración
-del primer administrador se debe habilitar por un operador de confianza, y la
-migración del catálogo existente aún no está implementada. Para asignar un rol
-a una cuenta activa existente
+del primer administrador se debe habilitar por un operador de confianza. Para
+asignar un rol a una cuenta activa existente
 un operador autorizado del proyecto puede ejecutar, desde un entorno de
 confianza con credenciales predeterminadas de Google:
 
@@ -90,22 +89,90 @@ Para desplegar Cloud Functions se requiere configurar el proyecto y sus
 permisos, y un plan de Firebase compatible con Cloud Functions. Las funciones
 se ejecutan en `us-central1` con Node.js 22.
 
-## Pendiente antes de usarlo
+## Validación y estado de producción
 
-Ejecutar la migración real del inventario y los tickets solo después de
-conciliar la vista previa y congelar el flujo anterior. También se deben impedir
-operaciones en paralelo entre clientes/versiones antiguas y nuevas, probar las
-reglas de Firestore y ejecutar la integración con los emuladores. La integración
-del POS simple y el cambio de roles están en el código, pero no se desplegaron
-ni se migraron datos; sin el inventario seguro y las cajas abiertas, las ventas
-fallan de forma explícita. Los emuladores requieren Java, que no estaba
-disponible en el entorno de desarrollo al validar estos cambios.
+Las pruebas unitarias se ejecutan con:
 
-También faltan la conciliación manual de pagos antiguos y sus devoluciones, la
-corrección del medio de pago, cambios, cuenta corriente, plan canje y emisión
-de comprobantes.
-El backend actual rechaza implícitamente esos flujos en vez de calcularlos de
-forma aproximada.
+```sh
+npm test --prefix functions
+```
+
+La integración con Authentication, Firestore y Functions Emulator requiere Java
+y se ejecuta desde la raíz del proyecto con:
+
+```sh
+firebase emulators:exec --project demo-bestore --only auth,firestore,functions "node functions/test/emulator-integration.js"
+```
+
+El 12/11/2026 pasaron las 21 pruebas unitarias y la integración de emuladores
+para permisos, inventario, cajas, vista previa, venta idempotente y devolución.
+
+En `be-store-app`, la vista previa de migración reportó 1 artículo elegible,
+0 artículos omitidos y 0 ventas elegibles u omitidas. La ejecución autorizada
+de `--apply` encontró una marca completa para la misma versión del origen y no
+escribió datos. `firebase functions:list` no reportó funciones desplegadas.
+El despliegue fue bloqueado porque el proyecto no está en el plan Blaze. No
+actualizar el plan ni habilitar facturación sin autorización explícita.
+Cuando el proyecto tenga un plan compatible, desplegar con:
+
+```sh
+firebase deploy --only functions --project be-store-app
+```
+
+Hasta completar el despliegue, las ventas nuevas siguen sin backend disponible.
+Después del despliegue, un administrador también debe abrir las cajas necesarias
+antes de vender.
+
+## Migración del flujo anterior
+
+`migrate-legacy.js` copia los artículos sin incidencias a `secure_inventory` y
+archiva los tickets sin incidencias en `secure_legacy_sales`. No convierte
+pagos, no crea movimientos ni saldos de caja, no permite devolver tickets
+antiguos y no elimina ni modifica `app_state/main`. Los registros con
+incidencias se omiten; los conflictos con documentos seguros existentes detienen
+el proceso sin sobrescribirlos. El archivo histórico no es todavía una fuente
+de lectura del POS ni del historial de ventas.
+
+Antes de una ejecución real, conciliar los datos requeridos, detener todas las
+escrituras del flujo anterior y evitar operaciones en paralelo entre clientes
+antiguos y nuevos. La herramienta verifica que `app_state/main` no cambie
+mientras copia los datos, pero no puede comprobar por sí sola que todos los
+clientes estén congelados.
+
+Con credenciales de Application Default Credentials autorizadas para el proyecto
+de destino, primero ejecutar la vista previa de solo lectura y revisar los
+conteos:
+
+```sh
+gcloud auth application-default login
+npm run migrate:legacy --prefix functions -- --project PROJECT_ID
+```
+
+Solo después de revisar los conteos y confirmar el congelamiento:
+
+```sh
+npm run migrate:legacy --prefix functions -- --project PROJECT_ID --apply --confirm-legacy-freeze PROJECT_ID
+```
+
+La operación es idempotente para la misma versión del origen: crea un marcador
+al finalizar y usa IDs deterministas para poder reintentar después de una
+interrupción. Si existe una marca de otra migración, hay conflictos o el origen
+cambia, el proceso se detiene para revisión manual. El comando usa el Admin SDK
+y requiere permisos para leer `app_state/main` y escribir las colecciones
+`secure_*`.
+
+La integración del POS simple y el cambio de roles están en el código, pero no
+se desplegaron. La migración ya tiene una marca completa para la versión actual
+de `app_state/main`; los tickets históricos no están disponibles en esta versión
+de origen. Aun después del despliegue, las ventas requieren cajas abiertas.
+
+La vista previa de producción no encontró tickets antiguos, por lo que no había
+pagos ni devoluciones históricas que conciliar en esa versión del origen.
+
+Por decisión del usuario, quedan pospuestos la corrección del medio de pago,
+cambios, cuenta corriente, plan canje y emisión de comprobantes. No habilitar
+esos flujos desde el backend seguro hasta acordar y documentar sus reglas de
+negocio y, para comprobantes, el proveedor de emisión.
 
 ### Contrato de devolución
 
