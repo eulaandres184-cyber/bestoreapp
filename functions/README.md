@@ -137,6 +137,11 @@ verificar su estado y confirmar los saldos.
 
 ## Preparación del conteo inicial de stock
 
+Los administradores pueden editar el nombre de una categoría desde
+Administrar categorías. La edición conserva el identificador de categoría para
+mantener asociados sus productos y guarda los cambios en Firebase; no permite
+nombres vacíos ni duplicados.
+
 Se revisó `LISTA BE STORE.xlsx` sin modificar el original ni escribir datos en
 Firebase. Se preparó
 [PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx](../PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx)
@@ -163,6 +168,11 @@ realizar el conteo físico.
 El costo de compra se dejó sin informar porque el XLSX solo contiene precios de
 venta. Se verificaron 107 registros en cada colección y que los precios
 coincidan entre ambos inventarios.
+
+Luego se movieron 11 productos de la categoría `FUNDAS Y TEMPLADOS` a
+`Vidrios Templados` (`proteccion`), según lo solicitado. Se conservaron sus
+precios, stock y estado; la verificación confirmó los 11 cambios y los precios
+originales.
 
 Se excluyeron las hojas `SAMSUNG`, `MOTOROLA`, `IPHONEs`, `USADOS` y `XIAOMI`,
 los productos con precio efectivo 0,00 y las filas sin precio efectivo

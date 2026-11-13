@@ -2142,9 +2142,42 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('categoryList').innerHTML = CATEGORIES.map(category => `
                 <div class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs">
                     <span class="font-semibold">${category.name}</span>
-                    ${isAdmin() ? `<button onclick="deleteCategory('${category.id}')" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fa-solid fa-trash"></i></button>` : ''}
+                    ${isAdmin() ? `<div class="flex items-center gap-2"><button onclick="renameCategory('${category.id}')" class="text-slate-600 hover:text-brand-600" title="Editar nombre de categoría"><i class="fa-solid fa-pen"></i></button><button onclick="deleteCategory('${category.id}')" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fa-solid fa-trash"></i></button></div>` : ''}
                 </div>
             `).join('');
+        }
+
+        async function renameCategory(id) {
+            if (!requireAdmin()) return;
+            const category = CATEGORIES.find(item => item.id === id);
+            if (!category) return;
+            const name = window.prompt('Nuevo nombre de la categoría:', category.name);
+            if (name === null) return;
+            const normalizedName = name.trim();
+            if (!normalizedName) return showToast('El nombre de la categoría no puede estar vacío.');
+            if (CATEGORIES.some(item => item.id !== id && item.name.toLowerCase() === normalizedName.toLowerCase())) {
+                return showToast('Ya existe una categoría con ese nombre.');
+            }
+            if (normalizedName === category.name) return;
+
+            const previousName = category.name;
+            category.name = normalizedName;
+            try {
+                await saveLocalState({ throwOnRemoteError: true });
+            } catch (error) {
+                category.name = previousName;
+                console.error('No se pudo actualizar el nombre de la categoría:', error);
+                showToast(error.message || 'No se pudo actualizar la categoría.');
+                return;
+            }
+
+            renderCategoryList();
+            renderCategorySelects();
+            renderCategoriesPage();
+            renderPOSCategories();
+            renderPOSItemsGrid();
+            renderAccTable();
+            showToast('Nombre de categoría actualizado.');
         }
 
         async function saveCategory(event) {
