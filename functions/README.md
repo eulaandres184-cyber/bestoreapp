@@ -174,6 +174,30 @@ Luego se movieron 11 productos de la categoría `FUNDAS Y TEMPLADOS` a
 precios, stock y estado; la verificación confirmó los 11 cambios y los precios
 originales.
 
+El 14/11/2026 se trasladaron en producción los 5 productos de `ADAPTADORES`
+y los 7 de `CARGADORES COMPLETOS` a `Cargadores & Adaptadores`. Se verificó
+que no quedaron productos en las categorías de origen y que los demás campos,
+incluidos precio, stock y estado, permanecieron sin cambios. Las categorías de
+origen se conservaron.
+
+El 14/11/2026 se trasladaron 27 productos de `FUNDAS Y TEMPLADOS` a
+`Fundas & Covers`, y 12 de `AURICULARES` y 4 de `PARLANTES` a `Audio &
+Auriculares`. Los 18 nombres de categorías existentes se ajustaron a palabras
+con inicial mayúscula, conservando sus identificadores y las categorías vacías.
+Se reactivaron 3 productos existentes que estaban anulados con stock positivo,
+tanto en el catálogo como en el inventario seguro, con auditoría para los
+cambios en el inventario seguro. No se modificaron precios ni cantidades.
+
+Al guardar o ajustar un accesorio con stock de una unidad o
+más lo reactiva; con stock cero queda anulado. Una devolución que repone una
+unidad también la reactiva en el inventario seguro. La anulación manual sigue
+disponible, pero un ajuste posterior de stock o una reposición por devolución
+puede reactivar el artículo. El 14/11/2026 se desplegaron Hosting y la función
+`recordReturn` en producción: el JavaScript publicado coincide con el código
+local, Hosting respondió HTTP 200 y la función figura activa en Node.js 22.
+Sin credenciales, la función rechazó la solicitud con `UNAUTHENTICATED`. No se
+ejecutó una devolución real en producción durante la verificación.
+
 Se excluyeron las hojas `SAMSUNG`, `MOTOROLA`, `IPHONEs`, `USADOS` y `XIAOMI`,
 los productos con precio efectivo 0,00 y las filas sin precio efectivo
 identificable. Los precios de tarjeta y USD no se cargaron. Los registros

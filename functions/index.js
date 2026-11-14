@@ -372,7 +372,7 @@ exports.recordReturn = guarded(async request => {
             assert(Number.isSafeInteger(snapshot.data().balanceCents) && snapshot.data().balanceCents >= payouts[index], 'La caja no tiene saldo suficiente.', 'failed-precondition');
         });
         returnItems.forEach((item, index) => {
-            if (item.restock) tx.update(itemRefs[index], { stock: snapshots[index].data().stock + item.quantity });
+            if (item.restock) tx.update(itemRefs[index], { stock: snapshots[index].data().stock + item.quantity, active: true });
         });
         registerSnapshots.forEach((snapshot, index) => {
             if (!payouts[index]) return;

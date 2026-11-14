@@ -2334,7 +2334,7 @@ let IPHONE_TRADE_IN_RATES = [];
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
-            const status = stock === 0 ? 'Anulado' : (existingIndex > -1 ? PRODUCTS[existingIndex].status || 'Activo' : 'Activo');
+            const status = stock > 0 ? 'Activo' : 'Anulado';
             const productObj = { ...PRODUCTS[existingIndex], id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, barcode, status };
 
             const isUpdate = existingIndex > -1;

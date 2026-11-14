@@ -243,10 +243,12 @@ test('devolución repone opcionalmente, debita caja y es idempotente', async () 
         reason: 'Cambio', source: { cash: 100000, transfer: 0, cardToCash: 0, cardToTransfer: 0 }
     };
     await assert.rejects(api.recordReturn(request('seller', 'seller', returnPayload)), error => error.code === 'permission-denied');
+    data.get('secure_inventory/A').active = false;
     const result = await api.recordReturn(request('admin', 'admin', returnPayload));
     const retry = await api.recordReturn(request('admin', 'admin', returnPayload));
     assert.equal(result.returnId, retry.returnId);
     assert.equal(data.get('secure_inventory/A').stock, 1);
+    assert.equal(data.get('secure_inventory/A').active, true);
     assert.equal(data.get('secure_registers/cash').balanceCents, 0);
     await assert.rejects(api.recordReturn(request('admin', 'admin', { ...returnPayload, operationId: 'c0ffcccc-2222-4333-8444-555555555558' })), error => error.code === 'failed-precondition');
 });
@@ -264,8 +266,10 @@ test('tarjeta reintegrada en transferencia, sin reponer producto averiado', asyn
         items: [{ id: 'A', quantity: 1, restock: false }], reason: 'Falla',
         source: { cash: 0, transfer: 0, cardToCash: 0, cardToTransfer: 100000 }
     };
+    data.get('secure_inventory/A').active = false;
     await api.recordReturn(request('admin', 'admin', returnPayload));
     assert.equal(data.get('secure_inventory/A').stock, 0);
+    assert.equal(data.get('secure_inventory/A').active, false);
     assert.equal(data.get('secure_registers/transfer').balanceCents, 100000);
     assert.ok(data.get('secure_registers/card').balanceCents > 0);
 });
