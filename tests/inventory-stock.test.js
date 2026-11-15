@@ -75,7 +75,6 @@ test('si falla el backend no se reactiva el producto localmente', async () => {
 
 test('guardar un producto en USD conserva esa cotización y usa ARS para el precio de caja', async () => {
     const context = createApp(1, 'Activo');
-    context.elements = undefined;
     vm.runInContext("dailyDollarRate = 1200", context);
     context.document.getElementById('prodCurrency').value = 'USD';
     context.document.getElementById('prodPrice').value = '15.5';

@@ -627,6 +627,7 @@ let IPHONE_TRADE_IN_RATES = [];
             renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
+            if (openCategoryId) showCategoryProducts(openCategoryId);
             showToast('Cotización actualizada. Se recalcularon los precios en USD.');
         }
 
@@ -1942,7 +1943,9 @@ let IPHONE_TRADE_IN_RATES = [];
                 stock.textContent = `${product.brand} · Stock: ${product.stock}`;
                 const price = document.createElement('span');
                 price.className = 'font-mono-num font-bold text-xs';
-                price.textContent = `$${product.price.toLocaleString('es-AR')}`;
+                price.textContent = product.currency === 'USD'
+                    ? `USD ${formatOptionalMoney(product.priceUsd)} · ARS $${product.price.toLocaleString('es-AR')}`
+                    : `$${product.price.toLocaleString('es-AR')}`;
                 details.append(title, stock);
                 item.append(details, price);
                 list.appendChild(item);
@@ -2437,6 +2440,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('productForm').reset();
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
+                updateProductPriceLabel();
                 showProductFeedback(isUpdate ? 'Producto actualizado exitosamente.' : 'Nuevo producto cargado al inventario.', true);
             } catch (error) {
                 console.error('No se pudo guardar el producto:', error);
