@@ -562,7 +562,13 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function normalizeCommercialData() {
-            PRODUCTS.forEach(product => { product.cashPrice = product.price; });
+            PRODUCTS.forEach(product => {
+                if (!product.currency) product.currency = 'ARS';
+                if (product.currency === 'USD' && product.priceUsd !== null && product.priceUsd !== undefined && dailyDollarRate > 0) {
+                    product.price = Math.round(Number(product.priceUsd) * dailyDollarRate);
+                }
+                product.cashPrice = product.price;
+            });
             PHONES.forEach(phone => {
                 if (!phone.currency) phone.currency = 'ARS';
                 if (phone.currency === 'USD' && phone.priceUsd && dailyDollarRate > 0) phone.price = Math.round(phone.priceUsd * dailyDollarRate);
@@ -618,9 +624,10 @@ let IPHONE_TRADE_IN_RATES = [];
             normalizeCommercialData();
             await saveLocalState();
             renderDashboard();
+            renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
-            showToast('Cotización actualizada. Se recalcularon los celulares en USD.');
+            showToast('Cotización actualizada. Se recalcularon los precios en USD.');
         }
 
         /* ACCESSORIES TABLE LOGIC */
@@ -677,7 +684,11 @@ let IPHONE_TRADE_IN_RATES = [];
                         </div>
                     </td>
                     <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${formatOptionalMoney(item.cost)}</td>
-                    <td class="p-3.5 font-mono-num font-bold text-slate-900">$${formatOptionalMoney(item.price)}</td>
+                    <td class="p-3.5 font-mono-num font-bold text-slate-900">
+                        ${item.currency === 'USD'
+                            ? `<span class="block">USD ${formatOptionalMoney(item.priceUsd)}</span><span class="text-[10px] font-semibold text-slate-500">ARS $${formatOptionalMoney(item.price)}</span>`
+                            : `$${formatOptionalMoney(item.price)}`}
+                    </td>
                     <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${formatOptionalMoney(item.cashPrice)}</td>
                     <td class="p-3.5 text-center">
                         <div class="flex items-center justify-center gap-2">
@@ -2325,6 +2336,7 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
             renderCaseSubcategoryOptions();
             updateProductSubcategoryField();
+            updateProductPriceLabel();
             document.getElementById('productModal').classList.remove('hidden');
         }
 
@@ -2347,8 +2359,24 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function autoCalcCashPrice() {
-            const listPrice = parseFloat(document.getElementById('prodPrice').value) || 0;
-            document.getElementById('prodCashPrice').value = listPrice;
+            updateProductConvertedPrice();
+        }
+
+        function updateProductPriceLabel() {
+            const currency = document.getElementById('prodCurrency').value || 'ARS';
+            document.getElementById('prodPriceLabel').textContent = `Precio de Lista (${currency}) *`;
+            updateProductConvertedPrice();
+        }
+
+        function updateProductConvertedPrice() {
+            const currency = document.getElementById('prodCurrency').value || 'ARS';
+            const enteredPrice = parseFloat(document.getElementById('prodPrice').value) || 0;
+            const converted = currency === 'USD'
+                ? (dailyDollarRate > 0 ? enteredPrice * dailyDollarRate : 0)
+                : enteredPrice;
+            const convertedPrice = converted > 0 ? Math.round(converted) : '';
+            document.getElementById('prodConvertedPrice').value = convertedPrice ? `$${convertedPrice.toLocaleString('es-AR')}` : '';
+            document.getElementById('prodCashPrice').value = convertedPrice;
         }
 
         async function saveProduct(e) {
@@ -2363,13 +2391,20 @@ let IPHONE_TRADE_IN_RATES = [];
             const stock = parseInt(document.getElementById('prodStock').value) || 0;
             const minStock = parseInt(document.getElementById('prodMinStock').value) || 3;
             const cost = parseFloat(document.getElementById('prodCost').value) || 0;
-            const price = parseFloat(document.getElementById('prodPrice').value) || 0;
+            const currency = document.getElementById('prodCurrency').value || 'ARS';
+            const enteredPrice = parseFloat(document.getElementById('prodPrice').value) || 0;
+            if (currency === 'USD' && dailyDollarRate <= 0) {
+                showToast('Carga primero la cotización del dólar para guardar un precio en USD.');
+                return;
+            }
+            const priceUsd = currency === 'USD' ? enteredPrice : null;
+            const price = currency === 'USD' ? Math.round(enteredPrice * dailyDollarRate) : enteredPrice;
             const cashPrice = price;
             const barcode = document.getElementById('prodBarcode').value.trim();
 
             const existingIndex = PRODUCTS.findIndex(p => p.id === id);
             const status = stock > 0 ? 'Activo' : 'Anulado';
-            const productObj = { ...PRODUCTS[existingIndex], id, title, category, subcategory, brand, stock, minStock, cost, price, cashPrice, barcode, status };
+            const productObj = { ...PRODUCTS[existingIndex], id, title, category, subcategory, brand, stock, minStock, cost, price, priceUsd, currency, cashPrice, barcode, status };
 
             const isUpdate = existingIndex > -1;
 
@@ -2444,8 +2479,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('prodStock').value = p.stock;
             document.getElementById('prodMinStock').value = p.minStock;
             document.getElementById('prodCost').value = p.cost;
-            document.getElementById('prodPrice').value = p.price;
-            document.getElementById('prodCashPrice').value = p.cashPrice;
+            document.getElementById('prodCurrency').value = p.currency || 'ARS';
+            document.getElementById('prodPrice').value = p.currency === 'USD' ? p.priceUsd : p.price;
+            updateProductPriceLabel();
             document.getElementById('prodBarcode').value = p.barcode || '';
 
             document.getElementById('productModalTitle').textContent = 'Editar Producto';

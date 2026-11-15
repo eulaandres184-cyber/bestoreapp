@@ -8,7 +8,7 @@ function createApp(stock, status) {
     const values = {
         prodId: 'ACC-1', prodTitle: 'Producto', prodCategory: 'audio',
         prodBrand: '', prodStock: String(stock), prodMinStock: '3',
-        prodCost: '0', prodPrice: '1000', prodBarcode: ''
+        prodCost: '0', prodCurrency: 'ARS', prodPrice: '1000', prodBarcode: ''
     };
     const elements = new Map(Object.entries(values).map(([id, value]) => [id, { value }]));
     const db = { collection: () => ({ doc: () => ({}) }) };
@@ -71,4 +71,21 @@ test('si falla el backend no se reactiva el producto localmente', async () => {
     await context.saveProduct({ preventDefault() {} });
     assert.equal(vm.runInContext('PRODUCTS[0].status', context), 'Anulado');
     assert.equal(vm.runInContext('PRODUCTS[0].stock', context), 0);
+});
+
+test('guardar un producto en USD conserva esa cotización y usa ARS para el precio de caja', async () => {
+    const context = createApp(1, 'Activo');
+    context.elements = undefined;
+    vm.runInContext("dailyDollarRate = 1200", context);
+    context.document.getElementById('prodCurrency').value = 'USD';
+    context.document.getElementById('prodPrice').value = '15.5';
+
+    await context.saveProduct({ preventDefault() {} });
+
+    assert.equal(context.saved.priceCents, 1860000);
+    assert.equal(vm.runInContext('PRODUCTS[0].currency', context), 'USD');
+    assert.equal(vm.runInContext('PRODUCTS[0].priceUsd', context), 15.5);
+    assert.equal(vm.runInContext('PRODUCTS[0].price', context), 18600);
+    vm.runInContext('dailyDollarRate = 1300; normalizeCommercialData()', context);
+    assert.equal(vm.runInContext('PRODUCTS[0].price', context), 20150);
 });
