@@ -25,17 +25,31 @@ body {
 }
 
 #posItemsGrid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 220px));
-    grid-auto-rows: minmax(0, 170px);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+    grid-auto-rows: 200px;
     align-content: start;
 }
 
 .pos-product-card {
+    box-sizing: border-box;
     width: 100%;
-    max-width: 220px;
-    max-height: 220px;
+    height: 200px;
+    max-width: 200px;
     min-width: 0;
-    overflow: hidden;
+}
+
+.pos-product-title {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+}
+
+.pos-product-price {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .sidebar-item {

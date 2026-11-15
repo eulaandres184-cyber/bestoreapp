@@ -876,20 +876,21 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             grid.innerHTML = itemsList.map(item => `
-                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="pos-product-card custom-card custom-card-hover p-3 flex flex-col justify-between cursor-pointer bg-white">
-                    <div class="space-y-2">
-                        <span class="inline-block bg-slate-100 text-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded">${item.type === 'phone' ? 'Celular' : 'Stock: ' + item.stock}</span>
-                        <div>
-                            <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block">${item.brand}</span>
-                            <h4 class="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">${item.title}</h4>
-                        </div>
+                <div onclick="addPOSItem('${item.id}', '${item.type}')" class="pos-product-card custom-card custom-card-hover p-3 flex flex-col cursor-pointer bg-white">
+                    <div class="shrink-0">
+                        <span class="inline-block bg-slate-100 text-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded">${item.type === 'phone' ? 'Celular · ' : ''}Stock: ${item.stock}</span>
+                        <span class="text-[9px] font-bold text-brand-600 uppercase tracking-wider block truncate mt-1">${item.brand}</span>
                     </div>
-                    <div class="pt-2 mt-1 border-t border-bonewhite-border flex items-baseline justify-between">
-                        <span class="text-xs font-extrabold font-mono-num text-slate-900">$${item.price.toLocaleString('es-AR')}</span>
+                    <h4 class="pos-product-title text-xs font-bold text-slate-900 leading-snug">${item.title}</h4>
+                    <div class="shrink-0 pt-2 mt-1 border-t border-bonewhite-border flex flex-wrap items-baseline justify-between gap-1">
+                        <span class="pos-product-price text-xs font-extrabold font-mono-num text-slate-900">$${item.price.toLocaleString('es-AR')}</span>
                         <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">+ Agregar</span>
                     </div>
                 </div>
             `).join('');
+            grid.querySelectorAll('.pos-product-title').forEach((title, index) => {
+                title.title = itemsList[index].title;
+            });
         }
 
         function addPOSItem(id, type) {

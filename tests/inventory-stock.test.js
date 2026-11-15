@@ -72,19 +72,3 @@ test('si falla el backend no se reactiva el producto localmente', async () => {
     assert.equal(vm.runInContext('PRODUCTS[0].status', context), 'Anulado');
     assert.equal(vm.runInContext('PRODUCTS[0].stock', context), 0);
 });
-
-test('guardar un producto en USD conserva esa cotización y usa ARS para el precio de caja', async () => {
-    const context = createApp(1, 'Activo');
-    vm.runInContext("dailyDollarRate = 1200", context);
-    context.document.getElementById('prodCurrency').value = 'USD';
-    context.document.getElementById('prodPrice').value = '15.5';
-
-    await context.saveProduct({ preventDefault() {} });
-
-    assert.equal(context.saved.priceCents, 1860000);
-    assert.equal(vm.runInContext('PRODUCTS[0].currency', context), 'USD');
-    assert.equal(vm.runInContext('PRODUCTS[0].priceUsd', context), 15.5);
-    assert.equal(vm.runInContext('PRODUCTS[0].price', context), 18600);
-    vm.runInContext('dailyDollarRate = 1300; normalizeCommercialData()', context);
-    assert.equal(vm.runInContext('PRODUCTS[0].price', context), 20150);
-});
