@@ -142,6 +142,11 @@ Administrar categorías. La edición conserva el identificador de categoría par
 mantener asociados sus productos y guarda los cambios en Firebase; no permite
 nombres vacíos ni duplicados.
 
+En la sección Categorías, un administrador puede seleccionar un producto de
+la lista para abrir su ficha de edición. Al guardar, la lista y los conteos de
+categorías se actualizan, incluso si el producto cambia de categoría. Los
+vendedores pueden consultar la lista, pero no abrir la ficha de edición.
+
 Se revisó `LISTA BE STORE.xlsx` sin modificar el original ni escribir datos en
 Firebase. Se preparó
 [PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx](../PLANTILLA-CONTEO-STOCK-BE-STORE.xlsx)
@@ -187,6 +192,12 @@ con inicial mayúscula, conservando sus identificadores y las categorías vacía
 Se reactivaron 3 productos existentes que estaban anulados con stock positivo,
 tanto en el catálogo como en el inventario seguro, con auditoría para los
 cambios en el inventario seguro. No se modificaron precios ni cantidades.
+
+Posteriormente se eliminaron en producción las seis categorías sin productos:
+`Fundas Y Templados`, `Adaptadores`, `Cargadores Completos`, `Auriculares`,
+`Parlantes` e `Inflables`. Se conservaron las 12 categorías con productos; la
+operación no modificó los 107 productos existentes. La comprobación incluyó
+también los productos sin stock o anulados.
 
 Al guardar o ajustar un accesorio con stock de una unidad o
 más lo reactiva; con stock cero queda anulado. Una devolución que repone una

@@ -145,6 +145,7 @@ let IPHONE_TRADE_IN_RATES = [];
         };
         let secureRegistersLoaded = false;
         let dailyDollarRate = 0;
+        let openCategoryId = null;
 
         let posState = {
             ticket: [],
@@ -1901,12 +1902,45 @@ let IPHONE_TRADE_IN_RATES = [];
             const category = CATEGORIES.find(item => item.id === categoryId);
             if (!category) return;
             const products = PRODUCTS.filter(product => product.category === categoryId);
+            openCategoryId = categoryId;
             document.getElementById('categoryProductsTitle').textContent = `${category.name} (${products.length})`;
-            document.getElementById('categoryProductsList').innerHTML = products.map(product => `<div class="border border-slate-200 rounded-xl p-3 flex items-center justify-between"><div><p class="font-bold text-xs text-slate-900">${product.title}</p><p class="text-[10px] text-slate-500">${product.brand} · Stock: ${product.stock}</p></div><span class="font-mono-num font-bold text-xs">$${product.price.toLocaleString('es-AR')}</span></div>`).join('') || '<p class="text-xs text-slate-400">No hay productos en esta categoría.</p>';
+            const list = document.getElementById('categoryProductsList');
+            list.replaceChildren();
+            if (!products.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-xs text-slate-400';
+                empty.textContent = 'No hay productos en esta categoría.';
+                list.appendChild(empty);
+            }
+            products.forEach(product => {
+                const admin = isAdmin();
+                const item = document.createElement(admin ? 'button' : 'div');
+                item.className = 'border border-slate-200 rounded-xl p-3 flex items-center justify-between text-left' +
+                    (admin ? ' hover:border-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600' : '');
+                if (admin) {
+                    item.type = 'button';
+                    item.title = 'Editar producto';
+                    item.addEventListener('click', () => editProduct(product.id));
+                }
+                const details = document.createElement('div');
+                const title = document.createElement('p');
+                title.className = 'font-bold text-xs text-slate-900';
+                title.textContent = product.title;
+                const stock = document.createElement('p');
+                stock.className = 'text-[10px] text-slate-500';
+                stock.textContent = `${product.brand} · Stock: ${product.stock}`;
+                const price = document.createElement('span');
+                price.className = 'font-mono-num font-bold text-xs';
+                price.textContent = `$${product.price.toLocaleString('es-AR')}`;
+                details.append(title, stock);
+                item.append(details, price);
+                list.appendChild(item);
+            });
             document.getElementById('categoryProductsPanel').classList.remove('hidden');
         }
 
         function closeCategoryProducts() {
+            openCategoryId = null;
             document.getElementById('categoryProductsPanel').classList.add('hidden');
         }
 
@@ -2359,6 +2393,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderAccTable();
                 renderCaseSubcategoryOptions();
                 updateAccessorySubcategoryFilter();
+                renderCategoriesPage();
+                if (openCategoryId) showCategoryProducts(openCategoryId);
                 if (!synced) {
                     showProductFeedback('El cambio quedó guardado en este dispositivo, pero Firebase no lo confirmó. Revisa la conexión y vuelve a intentar.', false);
                     return;
@@ -2393,9 +2429,11 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function editProduct(id) {
+            if (!requireAdmin()) return;
             const p = PRODUCTS.find(item => item.id === id);
             if (!p) return;
 
+            hideProductFeedback();
             document.getElementById('prodId').value = p.id;
             document.getElementById('prodTitle').value = p.title;
             document.getElementById('prodCategory').value = p.category;
