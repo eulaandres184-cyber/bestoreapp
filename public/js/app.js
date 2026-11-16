@@ -422,7 +422,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('No podés desactivar tu propio usuario.');
                 return;
             }
-            if (!(await showConfirm(`¿Desactivar el usuario ${nick}? No podrá ingresar al sistema.`))) return;
+            if (!confirm(`¿Desactivar el usuario ${nick}? No podrá ingresar al sistema.`)) return;
             await db.collection('users').doc(userId).update({ active: false, deactivatedAt: firebase.firestore.FieldValue.serverTimestamp() });
             await renderUserList();
             showToast('Usuario desactivado.');
@@ -2122,7 +2122,7 @@ let IPHONE_TRADE_IN_RATES = [];
         async function deleteSupplier(supplierId) {
             if (!requireAdmin()) return;
             const supplier = SUPPLIERS.find(item => item.id === supplierId);
-            if (!supplier || !(await showConfirm(`¿Eliminar al proveedor "${supplier.name}"?`))) return;
+            if (!supplier || !confirm(`¿Eliminar al proveedor "${supplier.name}"?`)) return;
             SUPPLIERS = SUPPLIERS.filter(item => item.id !== supplierId);
             await saveLocalState();
             renderSuppliers();
@@ -2200,7 +2200,7 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             const category = CATEGORIES.find(item => item.id === id);
             if (!category) return;
-            const name = await showPrompt('Nuevo nombre de la categoría:', category.name);
+            const name = window.prompt('Nuevo nombre de la categoría:', category.name);
             if (name === null) return;
             const normalizedName = name.trim();
             if (!normalizedName) return showToast('El nombre de la categoría no puede estar vacío.');
@@ -2555,7 +2555,7 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!requireAdmin()) return;
             const product = PRODUCTS.find(item => item.id === id);
             if (!product) return;
-            if (!(await showConfirm(`Se eliminará "${product.title}" del inventario. Las ventas registradas no se modificarán. ¿Continuar?`))) return;
+            if (!confirm(`Se eliminará "${product.title}" del inventario. Las ventas registradas no se modificarán. ¿Continuar?`)) return;
 
             try {
                 await callSecureFunction('saveInventoryItem', {
@@ -2866,85 +2866,20 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         /* TOAST NOTIFICATION HELPERS */
-        function openDialog({ message, icon = 'fa-circle-info', iconColor = 'text-sky-500', input = null, buttons }) {
-            return new Promise(resolve => {
-                const overlay = document.createElement('div');
-                overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50';
-                const card = document.createElement('div');
-                card.setAttribute('role', 'dialog');
-                card.className = 'bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center space-y-4';
-                const iconEl = document.createElement('i');
-                iconEl.className = `fa-solid ${icon} ${iconColor} text-3xl`;
-                const text = document.createElement('p');
-                text.className = 'text-sm font-semibold text-slate-800 break-words';
-                text.textContent = message;
-                card.append(iconEl, text);
-                let field = null;
-                if (input !== null) {
-                    field = document.createElement('input');
-                    field.type = 'text';
-                    field.value = input;
-                    field.className = 'w-full border border-slate-300 rounded-xl px-3 py-2 text-sm';
-                    card.appendChild(field);
-                }
-                const actions = document.createElement('div');
-                actions.className = 'flex gap-2 justify-center';
-                const close = value => {
-                    document.removeEventListener('keydown', onKey);
-                    overlay.remove();
-                    resolve(value);
-                };
-                const onKey = event => { if (event.key === 'Escape') close(buttons[0].value(field)); };
-                buttons.forEach(({ label, primary, value }) => {
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.textContent = label;
-                    button.className = primary
-                        ? 'px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold'
-                        : 'px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold';
-                    button.addEventListener('click', () => close(value(field)));
-                    actions.appendChild(button);
-                });
-                card.appendChild(actions);
-                overlay.appendChild(card);
-                overlay.addEventListener('click', event => {
-                    if (event.target === overlay) close(buttons[0].value(field));
-                });
-                document.addEventListener('keydown', onKey);
-                document.body.appendChild(overlay);
-                (field || actions.lastChild).focus();
-            });
-        }
-
         function showToast(message) {
-            return openDialog({
-                message: String(message),
-                icon: 'fa-circle-check',
-                iconColor: 'text-emerald-500',
-                buttons: [{ label: 'Cerrar', primary: true, value: () => undefined }]
-            });
-        }
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'bg-slate-900 border border-slate-700 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 transform translate-y-4 opacity-0 transition duration-300 pointer-events-auto';
+            toast.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i> ${message}`;
+            
+            container.appendChild(toast);
 
-        function showConfirm(message) {
-            return openDialog({
-                message,
-                icon: 'fa-circle-question',
-                iconColor: 'text-amber-500',
-                buttons: [
-                    { label: 'Cancelar', value: () => false },
-                    { label: 'Aceptar', primary: true, value: () => true }
-                ]
-            });
-        }
+            setTimeout(() => {
+                toast.classList.remove('translate-y-4', 'opacity-0');
+            }, 10);
 
-        function showPrompt(message, defaultValue = '') {
-            return openDialog({
-                message,
-                icon: 'fa-pen',
-                input: defaultValue,
-                buttons: [
-                    { label: 'Cancelar', value: () => null },
-                    { label: 'Aceptar', primary: true, value: field => field.value }
-                ]
-            });
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
         }
