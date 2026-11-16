@@ -156,6 +156,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
         let pendingSaleId = null;
         let posOperationInProgress = false;
+        let posQuoteInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
         let lastCreatedSale = null;
@@ -258,14 +259,18 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('El perfil y los permisos seguros no coinciden. Solicita a un administrador que vuelva a asignar tu rol.');
             }
             await loadLocalState();
+            let inventoryRefreshed = false;
             try {
-                await Promise.all([refreshSecureInventory(), refreshSecureRegisters()]);
+                await refreshSecureInventory();
+                inventoryRefreshed = true;
+                await refreshSecureRegisters();
             } catch (error) {
                 console.error('No se pudo consultar el inventario y las cajas seguras:', error);
                 showToast('No se pudo consultar el backend seguro. Las ventas nuevas requieren que las funciones estén disponibles y el inventario migrado.');
             }
             document.getElementById('authScreen').classList.add('hidden');
             normalizeCommercialData();
+            restoreTicketDraft(user.uid, inventoryRefreshed);
             document.getElementById('dailyDollarRate').value = dailyDollarRate || '';
             updatePhonePriceLabel();
             startSystemClock();
@@ -275,6 +280,8 @@ let IPHONE_TRADE_IN_RATES = [];
             renderSalesTable();
             renderPOSCategories();
             renderPOSItemsGrid();
+            renderPOSTicket();
+            setPOSPaymentMethod(posState.paymentMethod);
             renderCategorySelects();
             renderCategoriesPage();
             renderClients();
@@ -282,6 +289,7 @@ let IPHONE_TRADE_IN_RATES = [];
             await loadIphoneTradeInRates();
             updateCanjeModelOptions();
             applyRoleAccess();
+            if (pendingSaleId) reprintReceipt(pendingSaleId);
         }
 
         function showAuthMessage(message) {
@@ -322,6 +330,9 @@ let IPHONE_TRADE_IN_RATES = [];
         async function logoutUser() {
             await firebase.auth().signOut();
             currentUserProfile = null;
+            posState.ticket = [];
+            pendingSaleId = null;
+            posOperationInProgress = false;
             document.getElementById('authScreen').classList.remove('hidden');
         }
 
@@ -571,7 +582,7 @@ let IPHONE_TRADE_IN_RATES = [];
             });
             PHONES.forEach(phone => {
                 if (!phone.currency) phone.currency = 'ARS';
-                if (phone.currency === 'USD' && phone.priceUsd && dailyDollarRate > 0) phone.price = Math.round(phone.priceUsd * dailyDollarRate);
+                if (phone.currency === 'USD' && phone.priceUsd !== null && phone.priceUsd !== undefined && dailyDollarRate > 0) phone.price = Math.round(phone.priceUsd * dailyDollarRate);
             });
         }
 
@@ -620,15 +631,30 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('Ingresa una cotización del dólar válida.');
                 return;
             }
+            let result;
+            try {
+                result = await callSecureFunction('updateDollarRate', { rate: input });
+                if (!result || result.rate !== input || !Array.isArray(result.phones)) {
+                    throw new Error('El backend devolvió una respuesta inválida. Vuelve a iniciar sesión para comprobar la cotización.');
+                }
+            } catch (error) {
+                console.error('No se pudo actualizar la cotización segura:', error);
+                document.getElementById('dailyDollarRate').value = dailyDollarRate || '';
+                showToast(`${error.message || 'No se pudo confirmar la cotización.'} Vuelve a iniciar sesión para comprobar el valor guardado.`);
+                return;
+            }
             dailyDollarRate = input;
+            PHONES = result.phones.map(phone => posState.ticket.some(item => item.type === 'phone' && item.id === phone.id)
+                ? { ...phone, status: 'Reservado' } : phone);
             normalizeCommercialData();
-            await saveLocalState();
+            localStorage.setItem('bestore_internal_dollar_rate', String(dailyDollarRate));
+            localStorage.setItem('bestore_internal_phones', JSON.stringify(PHONES));
             renderDashboard();
             renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
             if (openCategoryId) showCategoryProducts(openCategoryId);
-            showToast('Cotización actualizada. Se recalcularon los precios en USD.');
+            showToast('Cotización actualizada. Los precios seguros de celulares en USD se recalcularon.');
         }
 
         /* ACCESSORIES TABLE LOGIC */
@@ -893,7 +919,8 @@ let IPHONE_TRADE_IN_RATES = [];
             });
         }
 
-        function addPOSItem(id, type) {
+        async function addPOSItem(id, type) {
+            if (posQuoteInProgress || posOperationInProgress || pendingSaleId) return;
             let foundItem = null;
 
             if (type === 'acc') {
@@ -916,6 +943,26 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!foundItem) return;
 
             const existingIndex = posState.ticket.findIndex(t => t.id === id);
+            let quoteId = null;
+            if (type === 'phone' && existingIndex === -1) {
+                if (PHONES.find(phone => phone.id === id)?.status !== 'En Stock') return;
+                posQuoteInProgress = true;
+                try {
+                    quoteId = createOperationId();
+                    const quote = await callSecureFunction('quotePhone', { id, quoteId });
+                    if (!quote || quote.quoteId !== quoteId || !Number.isSafeInteger(quote.priceCents) || quote.priceCents < 0) {
+                        throw new Error('El backend devolvió una cotización inválida.');
+                    }
+                    foundItem.price = quote.priceCents / 100;
+                    foundItem.cashPrice = foundItem.price;
+                } catch (error) {
+                    console.error('No se pudo fijar el precio del celular:', error);
+                    showToast(error.message || 'No se pudo fijar el precio del celular.');
+                    return;
+                } finally {
+                    posQuoteInProgress = false;
+                }
+            }
 
             if (existingIndex > -1) {
                 if (type === 'phone') {
@@ -937,6 +984,7 @@ let IPHONE_TRADE_IN_RATES = [];
                     quantity: 1,
                     type,
                     imei: foundItem.imei || null,
+                    ...(quoteId ? { quoteId } : {}),
                     maxStock: type === 'acc' ? foundItem.stock : 1
                 });
             }
@@ -946,6 +994,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 else posState.ticket.pop();
                 return;
             }
+            persistTicketDraft();
             renderPOSTicket();
             renderPOSItemsGrid();
             renderAccTable();
@@ -958,10 +1007,28 @@ let IPHONE_TRADE_IN_RATES = [];
             addPOSItem(phoneId, 'phone');
         }
 
-        function updatePOSTicketQty(id, delta) {
+        async function cancelTicketQuotes(items) {
+            const quoteIds = items.map(item => item.quoteId).filter(Boolean);
+            if (!quoteIds.length) return true;
+            posQuoteInProgress = true;
+            try {
+                await callSecureFunction('cancelPhoneQuotes', { quoteIds });
+                return true;
+            } catch (error) {
+                console.error('No se pudo cancelar la cotización:', error);
+                showToast(error.message || 'No se pudo cancelar la cotización del celular.');
+                return false;
+            } finally {
+                posQuoteInProgress = false;
+            }
+        }
+
+        async function updatePOSTicketQty(id, delta) {
+            if (posQuoteInProgress || posOperationInProgress || pendingSaleId) return;
             const index = posState.ticket.findIndex(t => t.id === id);
             if (index > -1) {
                 const item = posState.ticket[index];
+                if (delta < 0 && item.quantity + delta <= 0 && !await cancelTicketQuotes([item])) return;
                 if (delta > 0 && !reservePOSItem(id, item.type, 1)) return;
                 if (delta < 0) releasePOSItem(id, item.type, Math.min(item.quantity, Math.abs(delta)));
                 item.quantity += delta;
@@ -969,15 +1036,19 @@ let IPHONE_TRADE_IN_RATES = [];
                     posState.ticket.splice(index, 1);
                 }
             }
+            persistTicketDraft();
             renderPOSTicket();
             renderPOSItemsGrid();
             renderAccTable();
             renderPhonesTable();
         }
 
-        function clearPOSTicket() {
+        async function clearPOSTicket() {
+            if (posQuoteInProgress || posOperationInProgress || pendingSaleId) return;
+            if (!await cancelTicketQuotes(posState.ticket)) return;
             posState.ticket.forEach(item => releasePOSItem(item.id, item.type, item.quantity));
             posState.ticket = [];
+            persistTicketDraft();
             document.getElementById('posCanjeDeduction').value = '';
             renderPOSTicket();
             renderPOSItemsGrid();
@@ -1025,6 +1096,7 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('cardPlanSelect').classList.toggle('hidden', method !== 'card' && method !== 'mixed');
             document.getElementById('mixedPaymentFields').classList.toggle('hidden', method !== 'mixed');
 
+            if (posState.ticket.length && !pendingSaleId) persistTicketDraft();
             calculatePOSTotals();
         }
 
@@ -1095,12 +1167,80 @@ let IPHONE_TRADE_IN_RATES = [];
             return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
         }
 
+        function saveTicketDraft() {
+            const user = firebase.auth().currentUser;
+            if (!user) throw new Error('La sesión venció. No se pudo guardar el ticket pendiente.');
+            const pendingSale = pendingSaleId ? SALES.find(sale => sale.id === pendingSaleId) : null;
+            localStorage.setItem(`bestore_ticket_draft_${user.uid}`, JSON.stringify({
+                ticket: posState.ticket, paymentMethod: posState.paymentMethod, pendingSaleId, pendingSale
+            }));
+        }
+
+        function persistTicketDraft() {
+            try {
+                saveTicketDraft();
+                return true;
+            } catch (error) {
+                console.error('No se pudo guardar el ticket pendiente:', error);
+                showToast('No se pudo guardar el ticket en este dispositivo. Revisa el almacenamiento antes de continuar.');
+                return false;
+            }
+        }
+
+        function restoreTicketDraft(uid, inventoryRefreshed) {
+            posState.ticket = [];
+            posState.paymentMethod = 'transfer';
+            pendingSaleId = null;
+            posOperationInProgress = false;
+            const saved = localStorage.getItem(`bestore_ticket_draft_${uid}`);
+            if (!saved) return;
+            let draft;
+            try {
+                draft = JSON.parse(saved);
+            } catch (error) {
+                console.error('No se pudo leer el ticket pendiente:', error);
+                throw new Error('No se pudo recuperar el ticket pendiente de este dispositivo.');
+            }
+            if (!draft || !Array.isArray(draft.ticket) ||
+                draft.ticket.some(item => !item || typeof item.id !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0 ||
+                    !['phone', 'acc'].includes(item.type) || !Number.isFinite(item.price) || item.price < 0 ||
+                    (item.type === 'phone' && typeof item.quoteId !== 'string'))) {
+                throw new Error('El ticket pendiente de este dispositivo es inválido. Solicita una revisión antes de continuar.');
+            }
+            if (draft.pendingSaleId) {
+                if (!draft.pendingSale || draft.pendingSale.id !== draft.pendingSaleId || draft.pendingSale.status !== 'Pendiente de emisión') {
+                    throw new Error('No se encontró el comprobante pendiente de este dispositivo. Solicita una revisión antes de continuar.');
+                }
+                const index = SALES.findIndex(sale => sale.backendOperationId === draft.pendingSale.backendOperationId);
+                if (index >= 0 && SALES[index].status === 'Confirmada') {
+                    saveTicketDraft();
+                    return;
+                }
+                if (index >= 0) SALES[index] = draft.pendingSale;
+                else SALES.unshift(draft.pendingSale);
+            }
+            posState.ticket = draft.ticket;
+            if (['cash', 'transfer', 'mixed', 'card', 'account'].includes(draft.paymentMethod)) posState.paymentMethod = draft.paymentMethod;
+            pendingSaleId = draft.pendingSaleId || null;
+            posOperationInProgress = Boolean(pendingSaleId);
+            posState.ticket.forEach(item => {
+                if (item.type === 'phone') {
+                    const phone = PHONES.find(entry => entry.id === item.id);
+                    if (phone && phone.status === 'En Stock') phone.status = 'Reservado';
+                } else if (inventoryRefreshed) {
+                    const product = PRODUCTS.find(entry => entry.id === item.id);
+                    if (product) product.stock = Math.max(0, product.stock - item.quantity);
+                }
+            });
+        }
+
         function processPOSCheckout() {
-            if (posOperationInProgress || pendingSaleId) return;
+            if (posQuoteInProgress || posOperationInProgress || pendingSaleId) return;
             if (posState.ticket.length === 0) {
                 showToast("Cargá al menos un producto al ticket antes de cobrar.");
                 return;
             }
+            if (!persistTicketDraft()) return;
             if (posState.paymentMethod === 'account') {
                 showToast('Cuenta corriente todavía no está integrada al backend seguro. No se registró la venta.');
                 return;
@@ -1131,7 +1271,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('El pago mixto debe completar el importe a cobrar.');
                 return;
             }
-            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'account' ? 0 : netTotal;
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'card' ? netTotal : 0;
             const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             let total = netTotal + surcharge;
@@ -1187,6 +1327,11 @@ let IPHONE_TRADE_IN_RATES = [];
             lastCreatedSale = saleRecord;
             pendingSaleId = saleRecord.id;
             saveLocalState();
+            if (!persistTicketDraft()) {
+                showToast('El comprobante no pudo guardarse en este dispositivo. No se envió al backend.');
+                openReceiptModal(saleRecord);
+                return;
+            }
 
             // Refresh UI
             renderDashboard();
@@ -1471,6 +1616,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
             if (sale.status === 'Pendiente de emisión') {
+                if ((pendingSaleId && pendingSaleId !== sale.id) || (!pendingSaleId && posState.ticket.length)) {
+                    showToast('Termina o cancela el ticket actual antes de gestionar otro comprobante.');
+                    return;
+                }
                 pendingSaleId = sale.id;
                 await cancelPendingSale();
                 return;
@@ -1500,7 +1649,12 @@ let IPHONE_TRADE_IN_RATES = [];
 
         async function deleteSale(saleId) {
             if (!requireAdmin()) return;
-            if (SALES.find(item => item.id === saleId)?.backendTicketId) {
+            const sale = SALES.find(item => item.id === saleId);
+            if (sale?.status === 'Pendiente de emisión') {
+                showToast('Abre el comprobante pendiente y cancela la venta antes de eliminarlo.');
+                return;
+            }
+            if (sale?.backendTicketId) {
                 showToast('No se puede eliminar del historial una venta registrada en el backend seguro.');
                 return;
             }
@@ -1515,6 +1669,10 @@ let IPHONE_TRADE_IN_RATES = [];
             const sale = SALES.find(s => s.id === saleId);
             if (sale) {
                 if (sale.status === 'Pendiente de emisión') {
+                    if ((pendingSaleId && pendingSaleId !== sale.id) || (!pendingSaleId && posState.ticket.length)) {
+                        showToast('Termina o cancela el ticket actual antes de abrir otro comprobante.');
+                        return;
+                    }
                     pendingSaleId = sale.id;
                     posOperationInProgress = true;
                     const checkoutButton = document.getElementById('posCheckoutButton');
@@ -1574,12 +1732,16 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             const request = {
                 operationId: sale.backendOperationId,
-                items: sale.items.map(item => ({ id: item.id, quantity: item.quantity })),
+                items: sale.items.map(item => ({ id: item.id, quantity: item.quantity, ...(item.quoteId ? { quoteId: item.quoteId } : {}) })),
                 customerName: sale.customerName,
                 payment: sale.backendPayment
             };
             let backendCommitted = false;
             sale.backendSubmissionStarted = true;
+            if (!persistTicketDraft()) {
+                sale.backendSubmissionStarted = false;
+                return false;
+            }
             try {
                 const result = await callSecureFunction('recordSale', request);
                 backendCommitted = true;
@@ -1648,6 +1810,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 }
                 sale.status = 'Pendiente de emisión';
                 pendingSaleId = sale.id;
+                persistTicketDraft();
                 try {
                     await saveLocalState();
                 } catch (saveError) {
@@ -1667,6 +1830,7 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             pendingSaleId = null;
             posState.ticket = [];
+            persistTicketDraft();
             document.getElementById('posCanjeDeduction').value = '';
             document.getElementById('posCustomerName').value = '';
             document.getElementById('posCustomerPhone').value = '';
@@ -1691,12 +1855,14 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function cancelPendingSale() {
+            if (posQuoteInProgress) return;
             const sale = SALES.find(item => item.id === pendingSaleId);
             if (!sale || sale.status !== 'Pendiente de emisión') return;
             if (sale.backendSubmissionStarted) {
                 showToast('No se puede cancelar mientras el backend puede haber registrado la venta. Reintenta la emisión primero.');
                 return;
             }
+            if (!await cancelTicketQuotes(sale.items)) return;
             sale.items.forEach(item => releasePOSItem(item.id, item.type, item.quantity));
             const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
             if (client) {
@@ -1706,6 +1872,7 @@ let IPHONE_TRADE_IN_RATES = [];
             SALES = SALES.filter(item => item.id !== sale.id);
             pendingSaleId = null;
             posState.ticket = [];
+            persistTicketDraft();
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = false;
@@ -2140,7 +2307,10 @@ let IPHONE_TRADE_IN_RATES = [];
                     type: 'phone',
                     active: false,
                     stock: 0,
-                    priceCents: Math.round(phone.price * 100)
+                    priceCents: Math.round(phone.price * 100),
+                    currency: phone.currency || 'ARS',
+                    priceUsd: phone.priceUsd ?? null,
+                    expectedDollarRate: dailyDollarRate
                 });
                 phone.status = 'Vendido';
                 await saveLocalState({ throwOnRemoteError: true });
@@ -2164,7 +2334,10 @@ let IPHONE_TRADE_IN_RATES = [];
                     type: 'phone',
                     active: false,
                     stock: 0,
-                    priceCents: Math.round(phone.price * 100)
+                    priceCents: Math.round(phone.price * 100),
+                    currency: phone.currency || 'ARS',
+                    priceUsd: phone.priceUsd ?? null,
+                    expectedDollarRate: dailyDollarRate
                 });
                 PHONES = PHONES.filter(item => item.id !== id);
                 await saveLocalState({ throwOnRemoteError: true });
@@ -2701,7 +2874,10 @@ let IPHONE_TRADE_IN_RATES = [];
                     type: 'phone',
                     active: status === 'En Stock',
                     stock: status === 'En Stock' ? 1 : 0,
-                    priceCents: Math.round(price * 100)
+                    priceCents: Math.round(price * 100),
+                    currency,
+                    priceUsd,
+                    expectedDollarRate: dailyDollarRate
                 });
                 if (isUpdate) {
                     PHONES[existingIndex] = phoneObj;
@@ -2796,10 +2972,20 @@ let IPHONE_TRADE_IN_RATES = [];
                     ...state,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
-                if (isAdmin()) await appStateRef.set(payload, { merge: true });
-                else await appStateRef.update(payload);
+                if (isAdmin()) {
+                    await db.runTransaction(async transaction => {
+                        const snapshot = await transaction.get(appStateRef);
+                        if (snapshot.exists && (snapshot.data().dailyDollarRate || 0) !== payload.dailyDollarRate) {
+                            const error = new Error('La cotización cambió en otro dispositivo. Vuelve a iniciar sesión antes de guardar cambios.');
+                            error.code = 'state/stale-dollar-rate';
+                            throw error;
+                        }
+                        transaction.set(appStateRef, payload, { merge: true });
+                    });
+                } else await appStateRef.update(payload);
             } catch (error) {
                 console.error('No se pudo guardar el estado en Firestore:', error);
+                if (error.code === 'state/stale-dollar-rate') showToast(error.message);
                 if (throwOnRemoteError) throw error;
                 return false;
             }

@@ -105,6 +105,117 @@ test('solo un administrador puede consultar la vista previa y no modifica datos'
     assert.deepEqual([...data.entries()], before);
 });
 
+test('la vista previa distingue celulares USD conciliados de precios o inventario discordantes', async () => {
+    const { data, api, request } = fixture();
+    const phone = id => ({ id, brand: 'Apple', model: '15', storage: '128GB', condition: 'Nuevo', currency: 'USD', priceUsd: 480, price: 763200, status: 'En Stock' });
+    data.set('app_state/main', { products: [], phones: [phone('PH-1'), phone('PH-2'), phone('PH-3')], sales: [], dailyDollarRate: 1590 });
+    data.set('secure_inventory/PH-1', { name: 'Apple 15 128GB Nuevo', type: 'phone', active: true, stock: 1, priceCents: 76320000 });
+    data.set('secure_inventory/PH-2', { name: 'Apple 15 128GB Nuevo', type: 'phone', active: true, stock: 1, priceCents: 70000000 });
+    const before = structuredClone([...data.entries()]);
+    const preview = await api.previewLegacyMigration(request('admin', 'admin', {}));
+    assert.equal(preview.inventoryIssues, 2);
+    assert.equal(preview.inventory[0].issues.length, 0);
+    assert.match(preview.inventory[1].issues.join(), /USD/);
+    assert.match(preview.inventory[2].issues.join(), /USD/);
+    assert.deepEqual([...data.entries()], before);
+});
+
+test('la cotización actualiza solo celulares USD de forma atómica y conserva ventas y stock', async () => {
+    const { data, api, request } = fixture();
+    const usd = { id: 'PH-1', brand: 'Apple', model: '15', status: 'En Stock', currency: 'USD', priceUsd: 480, price: 763200 };
+    const ars = { id: 'PH-2', brand: 'Apple', model: '14', status: 'En Stock', currency: 'ARS', price: 1000 };
+    data.set('app_state/main', { phones: [usd, ars], products: [{ id: 'A', currency: 'USD', price: 300 }], sales: [{ total: 763200 }], dailyDollarRate: 1590 });
+    data.set('secure_inventory/PH-1', { name: 'Apple 15', type: 'phone', active: true, stock: 1, priceCents: 76320000 });
+    data.set('secure_inventory/PH-2', { name: 'Apple 14', type: 'phone', active: true, stock: 1, priceCents: 100000 });
+    data.set('secure_sales/old', { items: [{ id: 'PH-1', unitPriceCents: 76320000 }] });
+    await assert.rejects(api.updateDollarRate(request('seller', 'seller', { rate: 1700 })), error => error.code === 'permission-denied');
+    await api.updateDollarRate(request('admin', 'admin', { rate: 1700 }));
+    assert.equal(data.get('secure_inventory/PH-1').priceCents, 81600000);
+    assert.equal(data.get('secure_inventory/PH-1').stock, 1);
+    assert.equal(data.get('secure_inventory/PH-2').priceCents, 100000);
+    assert.equal(data.get('secure_inventory/A').priceCents, 100000);
+    assert.equal(data.get('app_state/main').phones[0].price, 816000);
+    assert.equal(data.get('app_state/main').sales[0].total, 763200);
+    assert.equal(data.get('secure_sales/old').items[0].unitPriceCents, 76320000);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_inventory_audit/')).length, 1);
+
+    data.get('app_state/main').phones.push({ ...usd, id: 'PH-MISSING' });
+    const before = JSON.stringify([...data.entries()]);
+    await assert.rejects(api.updateDollarRate(request('admin', 'admin', { rate: 1800 })), error => error.code === 'failed-precondition');
+    assert.equal(JSON.stringify([...data.entries()]), before);
+});
+
+test('el límite de actualización atómica admite 200 celulares y rechaza 201 sin escribir', async () => {
+    const { data, api, request } = fixture();
+    const phones = Array.from({ length: 201 }, (_, index) => ({
+        id: `PH-${index}`, currency: 'USD', priceUsd: 1, price: 1590, status: 'En Stock'
+    }));
+    data.set('app_state/main', { phones: phones.slice(0, 200), dailyDollarRate: 1590 });
+    phones.forEach(phone => data.set(`secure_inventory/${phone.id}`, {
+        name: phone.id, type: 'phone', stock: 1, active: true, priceCents: 159000
+    }));
+    const result = await api.updateDollarRate(request('admin', 'admin', { rate: 1700 }));
+    assert.equal(result.updated, 200);
+    assert.equal(data.get('secure_inventory/PH-199').priceCents, 170000);
+    data.get('app_state/main').phones.push(phones[200]);
+    const before = JSON.stringify([...data.entries()]);
+    await assert.rejects(api.updateDollarRate(request('admin', 'admin', { rate: 1800 })), error => error.code === 'failed-precondition');
+    assert.equal(JSON.stringify([...data.entries()]), before);
+});
+
+test('una cotización de celular conserva el precio, es personal y se usa una sola vez', async () => {
+    const { data, api, request } = fixture();
+    const quoteId = 'c0ffcccc-2222-4333-8444-555555555500';
+    const phone = { id: 'PH-1', brand: 'Apple', model: '15', status: 'En Stock', currency: 'USD', priceUsd: 480, price: 763200 };
+    data.set('app_state/main', { phones: [phone], products: [], sales: [], dailyDollarRate: 1590 });
+    data.set('secure_inventory/PH-1', { name: 'Apple 15', type: 'phone', active: true, stock: 1, priceCents: 76320000 });
+    const quoted = await api.quotePhone(request('seller', 'seller', { id: 'PH-1', quoteId }));
+    assert.equal(quoted.priceCents, 76320000);
+    await api.updateDollarRate(request('admin', 'admin', { rate: 1700 }));
+    assert.equal(data.get('secure_inventory/PH-1').priceCents, 81600000);
+    const saleRequest = {
+        operationId,
+        items: [{ id: 'PH-1', quantity: 1, quoteId, priceCents: 1 }],
+        payment: { cashCents: 76320000, transferCents: 0, cardBaseCents: 0 }
+    };
+    await assert.rejects(api.recordSale(request('admin', 'admin', saleRequest)), error => error.code === 'failed-precondition');
+    const sale = await api.recordSale(request('seller', 'seller', saleRequest));
+    assert.equal(sale.items[0].unitPriceCents, 76320000);
+    assert.equal((await api.recordSale(request('seller', 'seller', saleRequest))).ticketId, sale.ticketId);
+    assert.equal(data.get(`secure_phone_quotes/${quoteId}`).status, 'used');
+    await assert.rejects(api.cancelPhoneQuotes(request('seller', 'seller', { quoteIds: [quoteId] })), error => error.code === 'failed-precondition');
+    data.get('secure_inventory/PH-1').stock = 1;
+    await assert.rejects(api.recordSale(request('seller', 'seller', {
+        ...saleRequest, operationId: 'c0ffcccc-2222-4333-8444-555555555502'
+    })), error => error.code === 'failed-precondition');
+    assert.equal(data.get(`secure_sales/${sale.ticketId}`).items[0].unitPriceCents, 76320000);
+});
+
+test('cancelar una cotización impide utilizarla y no permite cancelar cotizaciones ajenas', async () => {
+    const { data, api, request } = fixture();
+    const quoteId = 'c0ffcccc-2222-4333-8444-555555555501';
+    data.set('secure_inventory/PH-1', { name: 'Celular', type: 'phone', active: true, stock: 1, priceCents: 100000 });
+    await api.quotePhone(request('seller', 'seller', { id: 'PH-1', quoteId }));
+    await assert.rejects(api.cancelPhoneQuotes(request('admin', 'admin', { quoteIds: [quoteId] })), error => error.code === 'failed-precondition');
+    await api.cancelPhoneQuotes(request('seller', 'seller', { quoteIds: [quoteId] }));
+    await api.cancelPhoneQuotes(request('seller', 'seller', { quoteIds: [quoteId] }));
+    await assert.rejects(api.recordSale(request('seller', 'seller', {
+        ...payload, items: [{ id: 'PH-1', quantity: 1, quoteId }]
+    })), error => error.code === 'failed-precondition');
+    assert.equal(data.get('secure_inventory/PH-1').stock, 1);
+});
+
+test('no se guarda un celular USD con una cotización desactualizada', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { dailyDollarRate: 1700, phones: [{ id: 'PH-1', currency: 'USD' }] });
+    data.set('secure_inventory/PH-1', { name: 'Celular', type: 'phone', active: true, stock: 1, priceCents: 81600000 });
+    const item = { id: 'PH-1', name: 'Celular', type: 'phone', active: true, stock: 1, currency: 'USD', priceUsd: 480, expectedDollarRate: 1590, priceCents: 76320000 };
+    await assert.rejects(api.saveInventoryItem(request('admin', 'admin', item)), error => error.code === 'failed-precondition');
+    assert.equal(data.get('secure_inventory/PH-1').priceCents, 81600000);
+    await api.saveInventoryItem(request('admin', 'admin', { ...item, expectedDollarRate: 1700, priceCents: 81600000 }));
+    assert.equal(data.get('secure_inventory/PH-1').priceCents, 81600000);
+});
+
 test('el catálogo y el estado de cajas se leen solo con una cuenta autorizada', async () => {
     const { data, api, request } = fixture();
     data.set('secure_registers/cash', { open: true, balanceCents: 15000, openingCents: 5000 });

@@ -52,7 +52,112 @@ exports.previewLegacyMigration = guarded(async request => {
     } catch (error) {
         throw new DomainError('failed-precondition', error.message);
     }
+    const state = snapshot.data();
+    const usdPhones = (state.phones || []).filter(phone => phone.currency === 'USD');
+    const refs = usdPhones.map(phone => typeof phone.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(phone.id)
+        ? db.doc(`secure_inventory/${phone.id}`) : null);
+    const secure = await Promise.all(refs.map(ref => ref ? ref.get() : null));
+    usdPhones.forEach((phone, index) => {
+        const entry = preview.inventory.find(item => item.type === 'phone' && item.id === phone.id);
+        const record = secure[index];
+        const rate = state.dailyDollarRate;
+        const calculated = Math.round(phone.priceUsd * rate) * 100;
+        if (entry && record?.exists && typeof phone.priceUsd === 'number' && phone.priceUsd >= 0 &&
+            typeof rate === 'number' && Number.isFinite(rate) && rate > 0 &&
+            Number.isSafeInteger(calculated) && record.data().type === 'phone' && record.data().name === entry.name &&
+            record.data().priceCents === calculated &&
+            record.data().stock === entry.stock && record.data().active === entry.active) {
+            entry.issues = entry.issues.filter(issue => issue !== 'Precio en USD requiere conciliación con la cotización vigente');
+        }
+    });
+    preview.inventoryIssues = preview.inventory.filter(item => item.issues.length).length;
     return preview;
+});
+
+exports.updateDollarRate = guarded(async request => {
+    const rate = request.data?.rate;
+    assert(typeof rate === 'number' && Number.isFinite(rate) && rate > 0, 'Cotización inválida.');
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const stateRef = db.doc('app_state/main');
+    return db.runTransaction(async tx => {
+        const [profile, snapshot] = await Promise.all([tx.get(profileRef), tx.get(stateRef)]);
+        authorize(request, profile, true);
+        assert(snapshot.exists && Array.isArray(snapshot.data().phones), 'No se encontró el inventario anterior.', 'failed-precondition');
+        const state = snapshot.data();
+        const phones = state.phones.filter(phone => phone.currency === 'USD');
+        assert(phones.length <= 200, 'Hay demasiados celulares en USD para actualizar la cotización de forma atómica.', 'failed-precondition');
+        const seen = new Set();
+        const refs = phones.map(phone => {
+            const [{ id }] = normalizeItems([{ id: phone.id, quantity: 1 }]);
+            assert(!seen.has(id), `Identificador duplicado: ${id}.`, 'failed-precondition');
+            seen.add(id);
+            assert(typeof phone.priceUsd === 'number' && Number.isFinite(phone.priceUsd) && phone.priceUsd >= 0,
+                `Precio USD inválido para ${id}.`, 'failed-precondition');
+            money(Math.round(phone.priceUsd * rate) * 100, `Precio de ${id}`);
+            return db.doc(`secure_inventory/${id}`);
+        });
+        const snapshots = await Promise.all(refs.map(ref => tx.get(ref)));
+        snapshots.forEach((item, index) => {
+            assert(item.exists && item.data().type === 'phone', `El celular ${phones[index].id} no está conciliado en el inventario seguro.`, 'failed-precondition');
+        });
+        const updatedPhones = state.phones.map(phone => phone.currency === 'USD'
+            ? { ...phone, price: Math.round(phone.priceUsd * rate) } : phone);
+        phones.forEach((phone, index) => {
+            const priceCents = Math.round(phone.priceUsd * rate) * 100;
+            tx.update(refs[index], { priceCents, updatedBy: request.auth.uid, updatedAt: FieldValue.serverTimestamp() });
+            tx.create(db.collection('secure_inventory_audit').doc(), {
+                itemId: phone.id, before: snapshots[index].data(),
+                after: { ...snapshots[index].data(), priceCents },
+                createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+            });
+        });
+        tx.update(stateRef, { dailyDollarRate: rate, phones: updatedPhones, updatedAt: FieldValue.serverTimestamp() });
+        return { rate, updated: phones.length, phones: updatedPhones };
+    });
+});
+
+exports.quotePhone = guarded(async request => {
+    const quoteId = requestId(request.data?.quoteId);
+    const [{ id }] = normalizeItems([{ id: request.data?.id, quantity: 1 }]);
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const itemRef = db.doc(`secure_inventory/${id}`);
+    const quoteRef = db.doc(`secure_phone_quotes/${quoteId}`);
+    return db.runTransaction(async tx => {
+        const [profile, item, quote] = await Promise.all([tx.get(profileRef), tx.get(itemRef), tx.get(quoteRef)]);
+        authorize(request, profile);
+        if (quote.exists) {
+            const saved = quote.data();
+            assert(saved.createdBy === request.auth.uid && saved.itemId === id && saved.status === 'open',
+                'La cotización ya no está disponible.', 'failed-precondition');
+            return { quoteId, priceCents: saved.priceCents };
+        }
+        assert(item.exists && item.data().type === 'phone' && item.data().active === true && item.data().stock === 1,
+            'El celular no está disponible en el inventario seguro.', 'failed-precondition');
+        const priceCents = money(item.data().priceCents, 'Precio');
+        tx.create(quoteRef, { itemId: id, priceCents, status: 'open', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        return { quoteId, priceCents };
+    });
+});
+
+exports.cancelPhoneQuotes = guarded(async request => {
+    const ids = request.data?.quoteIds;
+    assert(Array.isArray(ids) && ids.length <= 100, 'Cotizaciones inválidas.');
+    const quoteIds = ids.map(requestId);
+    assert(new Set(quoteIds).size === quoteIds.length, 'Cotizaciones duplicadas.');
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const refs = quoteIds.map(id => db.doc(`secure_phone_quotes/${id}`));
+    return db.runTransaction(async tx => {
+        const [profile, ...quotes] = await Promise.all([tx.get(profileRef), ...refs.map(ref => tx.get(ref))]);
+        authorize(request, profile);
+        quotes.forEach(quote => {
+            assert(quote.exists && quote.data().createdBy === request.auth.uid &&
+                ['open', 'cancelled'].includes(quote.data().status), 'La cotización no puede cancelarse.', 'failed-precondition');
+        });
+        quotes.forEach((quote, index) => {
+            if (quote.data().status === 'open') tx.update(refs[index], { status: 'cancelled', cancelledAt: FieldValue.serverTimestamp() });
+        });
+        return { cancelled: quoteIds.length };
+    });
 });
 
 exports.listInventory = guarded(async request => {
@@ -130,9 +235,26 @@ exports.saveInventoryItem = guarded(async request => {
     money(data.priceCents, 'Precio');
     const profileRef = db.doc(`users/${request.auth.uid}`);
     const itemRef = db.collection('secure_inventory').doc(id);
+    const stateRef = db.doc('app_state/main');
     return db.runTransaction(async tx => {
-        const [profile, item] = await Promise.all([tx.get(profileRef), tx.get(itemRef)]);
+        const [profile, item, state] = await Promise.all([tx.get(profileRef), tx.get(itemRef), tx.get(stateRef)]);
         authorize(request, profile, true);
+        if (data.type === 'phone') {
+            const previous = state.exists && Array.isArray(state.data().phones)
+                ? state.data().phones.find(phone => phone.id === id) : null;
+            if (data.currency === 'USD' || previous?.currency === 'USD') {
+                assert(data.currency === 'USD' || data.currency === 'ARS', 'Indica la moneda del celular.');
+                assert(state.exists && typeof state.data().dailyDollarRate === 'number' &&
+                    state.data().dailyDollarRate > 0 && data.expectedDollarRate === state.data().dailyDollarRate,
+                'La cotización cambió. Actualiza la aplicación antes de modificar el celular.', 'failed-precondition');
+            }
+            if (data.currency === 'USD') {
+                assert(typeof data.priceUsd === 'number' && Number.isFinite(data.priceUsd) && data.priceUsd >= 0,
+                    'Precio USD inválido.');
+                assert(data.priceCents === Math.round(data.priceUsd * state.data().dailyDollarRate) * 100,
+                    'El precio no coincide con la cotización vigente.', 'failed-precondition');
+            }
+        }
         const updated = { id, name, type: data.type, active: data.active, stock: data.stock, priceCents: data.priceCents };
         tx.set(itemRef, { ...updated, updatedBy: request.auth.uid, updatedAt: FieldValue.serverTimestamp() });
         tx.create(db.collection('secure_inventory_audit').doc(), {
@@ -252,16 +374,20 @@ exports.recordSale = guarded(async request => {
     const customerName = typeof data.customerName === 'string' ? data.customerName.trim() : '';
     assert(customerName.length <= 120, 'Nombre de cliente demasiado largo.');
     const payment = data.payment;
-    const hash = fingerprint({ items, customerName, payment });
+    const quoteIds = (data.items || []).map(item => item.quoteId == null ? null : requestId(item.quoteId));
+    assert(new Set(quoteIds.filter(Boolean)).size === quoteIds.filter(Boolean).length, 'Cotizaciones duplicadas.');
+    const hash = fingerprint({ items, customerName, payment, ...(quoteIds.some(Boolean) ? { quoteIds } : {}) });
     const profileRef = db.doc(`users/${request.auth.uid}`);
     const opRef = db.collection('secure_sale_operations').doc(`${request.auth.uid}_${operationId}`);
     const saleRef = db.collection('secure_sales').doc(randomUUID());
     const stockRefs = items.map(item => db.collection('secure_inventory').doc(item.id));
+    const quoteRefs = quoteIds.filter(Boolean).map(id => db.doc(`secure_phone_quotes/${id}`));
     const registerRefs = registers.map(medium => db.collection('secure_registers').doc(medium));
 
     return db.runTransaction(async tx => {
         const [profile, operation, ...snapshots] = await Promise.all([
-            tx.get(profileRef), tx.get(opRef), ...stockRefs.map(ref => tx.get(ref)), ...registerRefs.map(ref => tx.get(ref))
+            tx.get(profileRef), tx.get(opRef), ...stockRefs.map(ref => tx.get(ref)),
+            ...registerRefs.map(ref => tx.get(ref)), ...quoteRefs.map(ref => tx.get(ref))
         ]);
         authorize(request, profile);
         if (operation.exists) {
@@ -269,8 +395,19 @@ exports.recordSale = guarded(async request => {
             return operation.data().result;
         }
         const stockSnapshots = snapshots.slice(0, stockRefs.length);
-        const registerSnapshots = snapshots.slice(stockRefs.length);
+        const registerSnapshots = snapshots.slice(stockRefs.length, stockRefs.length + registerRefs.length);
+        const quoteSnapshots = snapshots.slice(stockRefs.length + registerRefs.length);
         const catalog = Object.fromEntries(stockSnapshots.map((snapshot, index) => [items[index].id, snapshot.exists ? snapshot.data() : null]));
+        let quoteIndex = 0;
+        quoteIds.forEach((quoteId, index) => {
+            if (!quoteId) return;
+            const quote = quoteSnapshots[quoteIndex++];
+            assert(quote.exists && quote.data().createdBy === request.auth.uid &&
+                quote.data().status === 'open' && quote.data().itemId === items[index].id &&
+                items[index].quantity === 1 && catalog[items[index].id]?.type === 'phone',
+            'La cotización del celular no está disponible.', 'failed-precondition');
+            catalog[items[index].id] = { ...catalog[items[index].id], priceCents: money(quote.data().priceCents, 'Precio cotizado') };
+        });
         const sale = calculateSale(items, catalog, payment);
         const movements = [sale.payment.cashCents, sale.payment.transferCents, sale.payment.cardNetCents];
         registerSnapshots.forEach((snapshot, index) => {
@@ -282,6 +419,7 @@ exports.recordSale = guarded(async request => {
         stockSnapshots.forEach((snapshot, index) => {
             tx.update(stockRefs[index], { stock: snapshot.data().stock - items[index].quantity });
         });
+        quoteRefs.forEach(ref => tx.update(ref, { status: 'used', saleId: saleRef.id, usedAt: FieldValue.serverTimestamp() }));
         registerSnapshots.forEach((snapshot, index) => {
             const amount = movements[index];
             if (!amount) return;

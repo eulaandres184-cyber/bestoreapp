@@ -17,13 +17,26 @@ controlado de los clientes anteriores.
   importe contado y la diferencia por medio. Si el estado quedó parcial, el
   botón único cierra en una transacción todas las cajas que aún estén abiertas;
   no se permite abrir solo una caja.
-- `recordSale`: venta con precios calculados desde `secure_inventory`, stock y
-  cajas actualizados en una transacción, y ticket UUID. Cada reintento debe
-  utilizar el mismo `operationId` UUID y la misma solicitud.
+- `updateDollarRate`: un administrador actualiza atómicamente la cotización y
+  los precios en pesos de los celulares en USD del estado anterior y del
+  inventario seguro, sin modificar stock ni ventas. Requiere que cada celular
+  en USD ya exista en el inventario seguro y admite hasta 200 por actualización.
+- `quotePhone` y `cancelPhoneQuotes`: fijan el precio seguro de un celular para
+  el usuario que lo agregó al ticket y cancelan esa cotización al quitarlo. La
+  cotización no vence, pero no reserva stock: otra venta puede agotar la unidad.
+  El ticket en curso se recupera en el mismo navegador y con el mismo usuario;
+  borrar los datos del navegador impide recuperarlo desde ese dispositivo.
+- `recordSale`: venta con precios de `secure_inventory` o de la cotización
+  segura del celular, stock y cajas actualizados en una transacción, y ticket
+  UUID. La cotización se usa una sola vez. Cada reintento debe utilizar el mismo
+  `operationId` UUID y la misma solicitud; el precio de la venta confirmada
+  queda guardado en el ticket.
 - `previewLegacyMigration`: un administrador consulta una vista previa del
   inventario y los tickets de `app_state/main`, con incidencias para conciliar.
-  No escribe ni migra datos, ni detiene la aplicación anterior. Los tickets
-  antiguos aún no pueden devolverse desde el backend nuevo.
+  Los celulares en USD que ya coinciden en nombre, estado, stock y precio con
+  el inventario seguro no se señalan por moneda. No escribe ni migra datos, ni
+  detiene la aplicación anterior. Los tickets antiguos aún no pueden devolverse
+  desde el backend nuevo.
 - `listInventory` y `getRegisterStatus`: la app consulta los artículos y saldos
   seguros para mostrar existencias y permitir que caja valide la disponibilidad.
 - `setUserRole`: un administrador con claim válida sincroniza el perfil y la
@@ -55,6 +68,18 @@ Al editar o ajustar un artículo desde la app, el cambio también se guarda en
 `secure_inventory`. Esto no es una migración masiva: los artículos existentes
 que no estén allí no se pueden vender por el POS seguro. La sincronización de
 existencias desde `secure_inventory` es de solo lectura para la app.
+
+Los cambios de cotización segura aplican a celulares en USD, no a accesorios.
+Los clientes que tengan una cotización anterior deben volver a iniciar sesión
+antes de guardar cambios. Las reglas impiden actualizar la cotización mediante
+escrituras directas a `app_state/main`: se debe usar `updateDollarRate`. Para
+habilitar el flujo deben desplegarse conjuntamente funciones, reglas de
+Firestore y Hosting; no se debe ejecutar de nuevo la migración solo para quitar
+una advertencia de un celular ya conciliado. Antes de desplegar, finalizar o
+cancelar los tickets abiertos con versiones anteriores, que no contienen una
+cotización segura. La herramienta de migración por línea de comandos continúa
+omitiendo celulares en USD; la conciliación de la vista previa de la app no
+modifica su plan de migración.
 
 ## Autorización y puesta en marcha
 

@@ -115,8 +115,37 @@ async function main() {
     });
     assert.equal((await db.doc('secure_inventory/ACC-1').get()).data().stock, 1);
     assert.equal((await db.doc('secure_registers/cash').get()).data().balanceCents, 0);
+
+    await db.doc('app_state/main').update({
+        dailyDollarRate: 1590,
+        phones: [{ id: 'PH-1', brand: 'Apple', model: '15', storage: '128GB', condition: 'Nuevo',
+            currency: 'USD', priceUsd: 480, price: 763200, status: 'En Stock' }]
+    });
+    await callable('saveInventoryItem', { id: 'PH-1', name: 'Apple 15 128GB Nuevo', type: 'phone', active: true,
+        stock: 1, currency: 'USD', priceUsd: 480, expectedDollarRate: 1590, priceCents: 76320000 });
+    assert.equal((await callable('previewLegacyMigration', {})).inventoryIssues, 0);
+    const directRate = await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/${projectId}/databases/(default)/documents/app_state/main?updateMask.fieldPaths=dailyDollarRate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${login.idToken}` },
+        body: JSON.stringify({ fields: { dailyDollarRate: { integerValue: '1800' } } })
+    });
+    assert.equal(directRate.status, 403, 'la cotización no debe poder modificarse sin el backend');
+    const quoteId = '01234567-1234-4234-8234-012345678903';
+    const quote = await callable('quotePhone', { id: 'PH-1', quoteId });
+    assert.equal(quote.priceCents, 76320000);
+    await callable('updateDollarRate', { rate: 1700 });
+    assert.equal((await db.doc('secure_inventory/PH-1').get()).data().priceCents, 81600000);
+    const phoneRequest = {
+        operationId: '01234567-1234-4234-8234-012345678904',
+        items: [{ id: 'PH-1', quantity: 1, quoteId }],
+        payment: { cashCents: 76320000, transferCents: 0, cardBaseCents: 0 }
+    };
+    const phoneSale = await callable('recordSale', phoneRequest);
+    assert.equal(phoneSale.items[0].unitPriceCents, 76320000);
+    assert.equal((await callable('recordSale', phoneRequest)).ticketId, phoneSale.ticketId);
+    assert.equal((await db.doc('secure_sales/' + phoneSale.ticketId).get()).data().items[0].unitPriceCents, 76320000);
     const closeResult = await callable('closeAllRegisters', {
-        countedCentsByMedium: { cash: 0, transfer: 0, card: 0 }
+        countedCentsByMedium: { cash: 76320000, transfer: 0, card: 0 }
     });
     assert.deepEqual(closeResult.differences, { cash: 0, transfer: 0, card: 0 });
     assert.ok(Object.values(await callable('getRegisterStatus', {})).every(register => !register.open));

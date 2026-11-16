@@ -21,7 +21,8 @@ function createApp() {
     const db = { collection: () => ({ doc: () => ({}) }) };
     const context = {
         tailwind: {},
-        firebase: { initializeApp() {}, firestore: () => db },
+        firebase: { initializeApp() {}, firestore: () => db, auth: () => ({ currentUser: { uid: 'user' } }) },
+        localStorage: { setItem() {} },
         crypto: webcrypto,
         window: {},
         document: {
@@ -111,6 +112,7 @@ test('efectivo y transferencia quedan registrados por separado', () => {
         assert.equal(sale.paymentBreakdown[method === 'cash' ? 'transfer' : 'cash'], 0);
         assert.match(sale.backendOperationId, /^[0-9a-f-]{36}$/i);
         assert.equal(sale.backendPayment[expected === 'cash' ? 'cashCents' : 'transferCents'], 100000);
+        assert.equal(sale.backendPayment.cardBaseCents, 0);
     }
 });
 
