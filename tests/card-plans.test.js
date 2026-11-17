@@ -104,6 +104,7 @@ test('efectivo y transferencia quedan registrados por separado', () => {
         for (const name of ['saveLocalState', 'renderDashboard', 'renderAccTable', 'renderPhonesTable', 'renderSalesTable', 'renderPOSItemsGrid', 'openReceiptModal', 'showToast']) {
             context[name] = () => {};
         }
+        context.finalizePendingSale = async () => true;
         context.methodFixture = method;
         vm.runInContext("posState.ticket = [{id:'A', title:'Producto', price:1000, quantity:1, type:'acc'}]; posState.paymentMethod = methodFixture", context);
         context.processPOSCheckout();
@@ -140,6 +141,7 @@ test('el backend confirma el ticket y conserva su operación al pasar al histori
     const storedRequest = {};
     const result = {
         ticketId: '01234567-1234-4234-8234-012345678901',
+        ticketNumber: 23,
         items: [{ id: 'A', name: 'Producto seguro', quantity: 1, unitPriceCents: 100000, totalCents: 100000, stockAfter: 4 }],
         subtotalCents: 100000,
         totalCents: 100000,
@@ -158,14 +160,41 @@ test('el backend confirma el ticket y conserva su operación al pasar al histori
         context[name] = async () => true;
     }
     vm.runInContext("PRODUCTS = [{id:'A', title:'Producto', stock:4, price:1000, status:'Activo'}]; posState.ticket = [{id:'A', title:'Producto', price:1000, quantity:1, type:'acc'}]; posState.paymentMethod = 'cash'", context);
-    context.processPOSCheckout();
+    await context.processPOSCheckout();
     const operationId = vm.runInContext('SALES[0].backendOperationId', context);
-    assert.equal(await context.finalizePendingSale('Impreso'), true);
     assert.equal(storedRequest.operationId, operationId);
+    assert.equal(storedRequest.customerName, 'Consumidor Final');
     assert.equal(storedRequest.payment.cashCents, 100000);
     assert.equal(vm.runInContext('SALES[0].id', context), result.ticketId);
+    assert.equal(vm.runInContext('SALES[0].ticketNumber', context), 23);
     assert.equal(vm.runInContext('SALES[0].status', context), 'Confirmada');
     assert.equal(vm.runInContext('PRODUCTS[0].stock', context), 4);
+});
+
+test('no envía dos veces una venta mientras se confirma', async () => {
+    const { context } = createApp();
+    let resolveSale;
+    let calls = 0;
+    context.callSecureFunction = () => {
+        calls++;
+        return new Promise(resolve => { resolveSale = resolve; });
+    };
+    for (const name of ['saveLocalState', 'renderDashboard', 'renderAccTable', 'renderPhonesTable', 'renderSalesTable', 'renderPOSItemsGrid', 'renderPOSTicket', 'renderCashRegister', 'refreshSecureRegisters', 'openReceiptModal', 'showToast']) {
+        context[name] = async () => true;
+    }
+    vm.runInContext("posState.ticket = [{id:'A', title:'Producto', price:1000, quantity:1, type:'acc'}]; posState.paymentMethod = 'cash'", context);
+    const checkout = context.processPOSCheckout();
+    await context.processPOSCheckout();
+    assert.equal(await context.finalizePendingSale(), false);
+    assert.equal(calls, 1);
+    resolveSale({
+        ticketId: '01234567-1234-4234-8234-012345678901', ticketNumber: 1,
+        items: [{ id: 'A', name: 'Producto', unitPriceCents: 100000, stockAfter: 0 }],
+        subtotalCents: 100000, totalCents: 100000,
+        payment: { cashCents: 100000, transferCents: 0, cardBaseCents: 0, cardTotalCents: 0, cardNetCents: 0 }
+    });
+    await checkout;
+    assert.equal(vm.runInContext('SALES[0].status', context), 'Confirmada');
 });
 
 test('la venta mixta guarda los tres medios y valida el total al centavo', () => {
@@ -174,6 +203,7 @@ test('la venta mixta guarda los tres medios y valida el total al centavo', () =>
     for (const name of ['saveLocalState', 'renderDashboard', 'renderAccTable', 'renderPhonesTable', 'renderSalesTable', 'renderPOSItemsGrid', 'openReceiptModal']) {
         context[name] = () => {};
     }
+    context.finalizePendingSale = async () => true;
     const messages = [];
     context.showToast = message => messages.push(message);
     context.updatePOSCardPlanOptions();

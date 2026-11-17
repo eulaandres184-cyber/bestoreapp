@@ -91,11 +91,13 @@ test('recupera un ticket pendiente del mismo usuario con su precio cotizado', as
 test('el comprobante transmite la cotización y se puede recuperar después de reiniciar', async () => {
     const { context } = createApp();
     let recorded;
+    let attempts = 0;
     context.callSecureFunction = async (name, payload) => {
         if (name === 'quotePhone') return { quoteId: payload.quoteId, priceCents: 76320000 };
         if (name === 'recordSale') {
             recorded = payload;
-            return { ticketId: '01234567-1234-4234-8234-012345678901', subtotalCents: 76320000, totalCents: 76320000,
+            if (attempts++ === 0) throw new Error('Sin conexión');
+            return { ticketId: '01234567-1234-4234-8234-012345678901', ticketNumber: 1, subtotalCents: 76320000, totalCents: 76320000,
                 items: [{ id: 'PH-1', name: 'Apple 15', unitPriceCents: 76320000, stockAfter: 0 }],
                 payment: { cashCents: 0, transferCents: 76320000, cardBaseCents: 0, cardTotalCents: 0, cardNetCents: 0 } };
         }
@@ -104,12 +106,12 @@ test('el comprobante transmite la cotización y se puede recuperar después de r
     for (const name of ['renderSalesTable', 'openReceiptModal', 'refreshSecureRegisters', 'renderCashRegister']) context[name] = () => {};
     await context.addPOSItem('PH-1', 'phone');
     const quoteId = vm.runInContext('posState.ticket[0].quoteId', context);
-    context.processPOSCheckout();
+    await context.processPOSCheckout();
     const operationId = vm.runInContext('SALES[0].backendOperationId', context);
     vm.runInContext("SALES = []; posState.ticket = []; pendingSaleId = null; posOperationInProgress = false; PHONES[0].status = 'En Stock'", context);
     context.restoreTicketDraft('user', true);
     assert.equal(vm.runInContext('SALES[0].backendOperationId', context), operationId);
-    assert.equal(await context.finalizePendingSale('Impreso'), true);
+    assert.equal(await context.finalizePendingSale(), true);
     assert.equal(recorded.items[0].quoteId, quoteId);
     assert.equal(recorded.payment.transferCents, 76320000);
     assert.equal(recorded.payment.cardBaseCents, 0);

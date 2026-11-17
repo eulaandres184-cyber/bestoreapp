@@ -367,6 +367,67 @@ exports.closeAllRegisters = guarded(async request => {
     });
 });
 
+exports.assignLegacyTicketNumbers = guarded(async request => {
+    const ids = request.data?.saleIds;
+    assert(Array.isArray(ids) && ids.length > 0 && ids.length <= 50 &&
+        ids.every(id => typeof id === 'string' && id.length > 0 && id.length <= 200) &&
+        new Set(ids).size === ids.length, 'Identificadores de ventas inválidos.');
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const stateRef = db.doc('app_state/main');
+    const counterRef = db.doc('secure_counters/sale_tickets');
+    const assignmentRefs = ids.map(id => db.doc(`secure_ticket_numbers/${createHash('sha256').update(id).digest('hex')}`));
+    const saleRefs = ids.map(id => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)
+        ? db.doc(`secure_sales/${id}`) : null);
+
+    return db.runTransaction(async tx => {
+        const [profile, state, counter, ...snapshots] = await Promise.all([
+            tx.get(profileRef), tx.get(stateRef), tx.get(counterRef),
+            ...assignmentRefs.map(ref => tx.get(ref)),
+            ...saleRefs.map(ref => ref ? tx.get(ref) : Promise.resolve(null))
+        ]);
+        authorize(request, profile);
+        assert(state.exists && Array.isArray(state.data().sales), 'No se encontró el historial de ventas.', 'failed-precondition');
+        const history = state.data().sales;
+        const lastTicketNumber = counter.exists ? counter.data().lastTicketNumber : 0;
+        assert(Number.isSafeInteger(lastTicketNumber) && lastTicketNumber >= 0,
+            'El contador de tickets no es válido.', 'failed-precondition');
+        assert(history.every(sale => sale && (sale.ticketNumber === undefined ||
+            (Number.isSafeInteger(sale.ticketNumber) && sale.ticketNumber > 0 && sale.ticketNumber <= lastTicketNumber))),
+        'El historial contiene números que no coinciden con el contador; solicita una revisión.', 'failed-precondition');
+        const existingNumbers = history.filter(sale => sale.ticketNumber !== undefined).map(sale => sale.ticketNumber);
+        assert(new Set(existingNumbers).size === existingNumbers.length,
+            'El historial contiene números de ticket duplicados; solicita una revisión.', 'failed-precondition');
+        let nextNumber = lastTicketNumber;
+        const numbers = ids.map((id, index) => {
+            const matches = history.filter(sale => sale.id === id);
+            assert(matches.length === 1 && matches[0].status !== 'Pendiente de emisión',
+                'Una venta no está disponible en el historial compartido.', 'failed-precondition');
+            const assignment = snapshots[index];
+            const secureSale = snapshots[ids.length + index];
+            const candidates = [
+                matches[0].ticketNumber,
+                assignment.exists ? assignment.data().ticketNumber : undefined,
+                secureSale?.exists ? secureSale.data().ticketNumber : undefined
+            ].filter(value => value !== undefined);
+            assert(candidates.every(value => Number.isSafeInteger(value) && value > 0 && value <= lastTicketNumber) &&
+                new Set(candidates).size <= 1, 'El número de una venta requiere revisión.', 'failed-precondition');
+            if (assignment.exists) assert(assignment.data().saleId === id, 'La asignación del ticket requiere revisión.', 'failed-precondition');
+            if (!candidates.length) {
+                assert(nextNumber < Number.MAX_SAFE_INTEGER, 'Se agotó el contador de tickets.', 'failed-precondition');
+                nextNumber += 1;
+            }
+            const ticketNumber = candidates.length ? candidates[0] : nextNumber;
+            if (!assignment.exists) tx.create(assignmentRefs[index], { saleId: id, ticketNumber });
+            if (secureSale?.exists && secureSale.data().ticketNumber === undefined) {
+                tx.update(saleRefs[index], { ticketNumber });
+            }
+            return { saleId: id, ticketNumber };
+        });
+        if (nextNumber !== lastTicketNumber) tx.set(counterRef, { lastTicketNumber: nextNumber });
+        return { numbers };
+    });
+});
+
 exports.recordSale = guarded(async request => {
     const data = request.data || {};
     const operationId = requestId(data.operationId);
@@ -380,20 +441,44 @@ exports.recordSale = guarded(async request => {
     const profileRef = db.doc(`users/${request.auth.uid}`);
     const opRef = db.collection('secure_sale_operations').doc(`${request.auth.uid}_${operationId}`);
     const saleRef = db.collection('secure_sales').doc(randomUUID());
+    const ticketCounterRef = db.doc('secure_counters/sale_tickets');
     const stockRefs = items.map(item => db.collection('secure_inventory').doc(item.id));
     const quoteRefs = quoteIds.filter(Boolean).map(id => db.doc(`secure_phone_quotes/${id}`));
     const registerRefs = registers.map(medium => db.collection('secure_registers').doc(medium));
 
     return db.runTransaction(async tx => {
-        const [profile, operation, ...snapshots] = await Promise.all([
-            tx.get(profileRef), tx.get(opRef), ...stockRefs.map(ref => tx.get(ref)),
+        const [profile, operation, counter, ...snapshots] = await Promise.all([
+            tx.get(profileRef), tx.get(opRef), tx.get(ticketCounterRef), ...stockRefs.map(ref => tx.get(ref)),
             ...registerRefs.map(ref => tx.get(ref)), ...quoteRefs.map(ref => tx.get(ref))
         ]);
         authorize(request, profile);
         if (operation.exists) {
             assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra operación.', 'already-exists');
-            return operation.data().result;
+            const result = operation.data().result;
+            if (result.ticketNumber !== undefined) return result;
+            const existingSaleRef = db.doc(`secure_sales/${result.ticketId}`);
+            const existingSale = await tx.get(existingSaleRef);
+            assert(existingSale.exists, 'No se encontró la venta confirmada para recuperar su número.', 'failed-precondition');
+            const lastNumber = counter.exists ? counter.data().lastTicketNumber : 0;
+            assert(Number.isSafeInteger(lastNumber) && lastNumber >= 0 && lastNumber < Number.MAX_SAFE_INTEGER,
+                'El contador de tickets no es válido.', 'failed-precondition');
+            let ticketNumber = existingSale.data().ticketNumber;
+            if (ticketNumber === undefined) {
+                ticketNumber = lastNumber + 1;
+                tx.set(ticketCounterRef, { lastTicketNumber: ticketNumber });
+                tx.update(existingSaleRef, { ticketNumber });
+            } else {
+                assert(Number.isSafeInteger(ticketNumber) && ticketNumber > 0 && ticketNumber <= lastNumber,
+                    'El número de la venta requiere revisión.', 'failed-precondition');
+            }
+            const numberedResult = { ...result, ticketNumber };
+            tx.update(opRef, { result: numberedResult });
+            return numberedResult;
         }
+        const lastTicketNumber = counter.exists ? counter.data().lastTicketNumber : 0;
+        assert(Number.isSafeInteger(lastTicketNumber) && lastTicketNumber >= 0 && lastTicketNumber < Number.MAX_SAFE_INTEGER,
+            'El contador de tickets no es válido.', 'failed-precondition');
+        const ticketNumber = lastTicketNumber + 1;
         const stockSnapshots = snapshots.slice(0, stockRefs.length);
         const registerSnapshots = snapshots.slice(stockRefs.length, stockRefs.length + registerRefs.length);
         const quoteSnapshots = snapshots.slice(stockRefs.length + registerRefs.length);
@@ -431,13 +516,15 @@ exports.recordSale = guarded(async request => {
         });
         const result = {
             ticketId: saleRef.id,
+            ticketNumber,
             ...sale,
             items: sale.items.map((item, index) => ({
                 ...item,
                 stockAfter: stockSnapshots[index].data().stock - items[index].quantity
             }))
         };
-        tx.create(saleRef, { ...result, customerName: customerName || 'Cliente Mostrador', status: 'Confirmada', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        tx.set(ticketCounterRef, { lastTicketNumber: ticketNumber });
+        tx.create(saleRef, { ...result, customerName: customerName || 'Consumidor Final', status: 'Confirmada', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
         tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
         return result;
     });

@@ -156,6 +156,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
         let pendingSaleId = null;
         let posOperationInProgress = false;
+        let saleFinalizationInProgress = false;
         let posQuoteInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
@@ -271,6 +272,12 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('authScreen').classList.add('hidden');
             normalizeCommercialData();
             restoreTicketDraft(user.uid, inventoryRefreshed);
+            try {
+                await assignMissingTicketNumbers();
+            } catch (error) {
+                console.error('No se pudieron numerar las ventas anteriores:', error);
+                showToast('No se pudieron numerar las ventas anteriores. Inicia sesión nuevamente para reintentar.');
+            }
             document.getElementById('dailyDollarRate').value = dailyDollarRate || '';
             updatePhonePriceLabel();
             startSystemClock();
@@ -560,13 +567,50 @@ let IPHONE_TRADE_IN_RATES = [];
             renderDashboardRecentSales();
         }
 
+        function getTicketNumber(sale) {
+            if (Number.isSafeInteger(sale.ticketNumber) && sale.ticketNumber > 0) {
+                return String(sale.ticketNumber).padStart(4, '0');
+            }
+            return null;
+        }
+
+        function getTicketLabel(sale) {
+            const number = getTicketNumber(sale);
+            if (number) return `Ticket-BS-${number}`;
+            return sale.status === 'Pendiente de emisión' ? 'Venta pendiente' : 'Ticket sin numerar';
+        }
+
+        async function assignMissingTicketNumbers() {
+            const unnumbered = SALES.filter(sale => sale.status !== 'Pendiente de emisión' && !getTicketNumber(sale)).reverse();
+            for (let offset = 0; offset < unnumbered.length; offset += 50) {
+                const batch = unnumbered.slice(offset, offset + 50);
+                const result = await callSecureFunction('assignLegacyTicketNumbers', { saleIds: batch.map(sale => sale.id) });
+                if (!result || !Array.isArray(result.numbers) || result.numbers.length !== batch.length ||
+                    result.numbers.some(entry => !entry || !Number.isSafeInteger(entry.ticketNumber) || entry.ticketNumber <= 0) ||
+                    new Set(result.numbers.map(entry => entry.saleId)).size !== batch.length ||
+                    new Set(result.numbers.map(entry => entry.ticketNumber)).size !== batch.length ||
+                    batch.some(sale => !result.numbers.some(entry => entry.saleId === sale.id))) {
+                    throw new Error('El backend devolvió una numeración de tickets inválida.');
+                }
+                batch.forEach(sale => {
+                    sale.ticketNumber = result.numbers.find(entry => entry.saleId === sale.id).ticketNumber;
+                });
+            }
+            if (unnumbered.length) localStorage.setItem('bestore_internal_sales', JSON.stringify(SALES));
+        }
+
+        function getSaleCustomerName(sale) {
+            const name = typeof sale.customerName === 'string' ? sale.customerName.trim() : '';
+            return !name || name === 'Cliente Mostrador' ? 'Consumidor Final' : name;
+        }
+
         function renderDashboardRecentSales() {
             const container = document.getElementById('dashRecentSalesList');
             const recentSales = SALES.slice(0, 6);
             container.innerHTML = recentSales.map(sale => `
                 <button onclick="reprintReceipt('${sale.id}')" class="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left hover:border-brand-400 hover:bg-white transition">
-                    <span class="flex items-center justify-between gap-3"><strong class="text-xs text-slate-900">${sale.id}</strong><strong class="text-xs font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')}</strong></span>
-                    <span class="mt-1 block truncate text-[11px] text-slate-600">${sale.customerName} · ${sale.items.map(item => `${item.quantity}x ${item.title}`).join(', ')}</span>
+                    <span class="flex items-center justify-between gap-3"><strong class="min-w-0 break-all text-xs text-slate-900">${getTicketLabel(sale)}</strong><strong class="text-xs font-mono-num ${sale.status === 'Anulada' ? 'text-red-600 line-through' : 'text-emerald-600'}">$${sale.total.toLocaleString('es-AR')}</strong></span>
+                    <span class="mt-1 block truncate text-[11px] text-slate-600">${getSaleCustomerName(sale)} · ${sale.items.map(item => `${item.quantity}x ${item.title}`).join(', ')}</span>
                     <span class="mt-1 block text-[10px] text-slate-400">${sale.date}${sale.status === 'Anulada' ? ' · Anulada' : ''}</span>
                 </button>
             `).join('') || '<p class="py-12 text-center text-xs text-slate-400">Aún no hay ventas registradas.</p>';
@@ -1234,7 +1278,7 @@ let IPHONE_TRADE_IN_RATES = [];
             });
         }
 
-        function processPOSCheckout() {
+        async function processPOSCheckout() {
             if (posQuoteInProgress || posOperationInProgress || pendingSaleId) return;
             if (posState.ticket.length === 0) {
                 showToast("Cargá al menos un producto al ticket antes de cobrar.");
@@ -1246,7 +1290,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
-            const customerName = document.getElementById('posCustomerName').value.trim() || 'Cliente Mostrador';
+            const customerName = document.getElementById('posCustomerName').value.trim() || 'Consumidor Final';
             const customerPhone = document.getElementById('posCustomerPhone').value.trim() || '-';
             const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
             if (!Number.isFinite(canjeVal) || canjeVal < 0) {
@@ -1285,10 +1329,11 @@ let IPHONE_TRADE_IN_RATES = [];
             posOperationInProgress = true;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = true;
-            checkoutButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Preparando comprobante...</span>';
+            checkoutButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Finalizando venta...</span>';
+            const operationId = createOperationId();
             const saleRecord = {
-                id: `TK-${Date.now().toString().slice(-5)}`,
-                backendOperationId: createOperationId(),
+                id: operationId,
+                backendOperationId: operationId,
                 backendPayment,
                 backendSubmissionStarted: false,
                 date: `${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`,
@@ -1316,7 +1361,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
             SALES.unshift(saleRecord);
             let client = CLIENTS.find(item => item.name.toLowerCase() === customerName.toLowerCase());
-            if (!client && customerName !== 'Cliente Mostrador') {
+            if (!client && customerName !== 'Consumidor Final') {
                 client = { id: `CLI-${Date.now()}`, name: customerName, phone: customerPhone === '-' ? '' : customerPhone, email: '', purchaseCount: 0 };
                 CLIENTS.push(client);
             }
@@ -1326,22 +1371,12 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             lastCreatedSale = saleRecord;
             pendingSaleId = saleRecord.id;
-            saveLocalState();
             if (!persistTicketDraft()) {
                 showToast('El comprobante no pudo guardarse en este dispositivo. No se envió al backend.');
                 openReceiptModal(saleRecord);
                 return;
             }
-
-            // Refresh UI
-            renderDashboard();
-            renderAccTable();
-            renderPhonesTable();
-            renderSalesTable();
-            renderPOSItemsGrid();
-
-            openReceiptModal(saleRecord);
-            showToast('Comprobante listo. Imprime, envía por WhatsApp o cancela la venta.');
+            await finalizePendingSale();
         }
 
         function cashRegisterDate() {
@@ -1582,11 +1617,11 @@ let IPHONE_TRADE_IN_RATES = [];
             body.innerHTML = SALES.map(sale => `
                 <tr class="hover:bg-slate-50 transition ${sale.status === 'Anulada' ? 'opacity-50 bg-red-50' : sale.status === 'Pendiente de emisión' ? 'bg-amber-50' : ''}">
                     <td class="p-3.5">
-                        <span class="font-bold text-slate-900 block font-mono-num">${sale.id}</span>
+                        <span class="font-bold text-slate-900 block font-mono-num break-all">${getTicketLabel(sale)}</span>
                         <span class="text-[10px] text-slate-400">${sale.date}</span>
                     </td>
                     <td class="p-3.5 font-medium text-slate-800">
-                        ${sale.customerName}
+                        ${getSaleCustomerName(sale)}
                         ${sale.customerPhone !== '-' ? `<span class="block text-[10px] text-slate-400">${sale.customerPhone}</span>` : ''}
                     </td>
                     <td class="p-3.5">
@@ -1684,10 +1719,10 @@ let IPHONE_TRADE_IN_RATES = [];
 
         function openReceiptModal(sale) {
             lastCreatedSale = sale;
-            document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | Ticket: ${sale.id}`;
+            document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | ${getTicketLabel(sale)}`;
             document.getElementById('receiptCustomerInfo').innerHTML = `
-                <div><strong>Cliente:</strong> ${sale.customerName}</div>
-                ${sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
+                <div><strong>Cliente:</strong> ${getSaleCustomerName(sale)}</div>
+                ${sale.customerPhone && sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
                 <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
                 ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
                 ${sale.paymentVersion === 2 && sale.paymentMethod === 'Pago mixto' ? `<div><strong>Efectivo:</strong> $${sale.paymentBreakdown.cash.toLocaleString('es-AR')} · <strong>Transferencia:</strong> $${sale.paymentBreakdown.transfer.toLocaleString('es-AR')} · <strong>Tarjeta:</strong> $${sale.paymentBreakdown.card.toLocaleString('es-AR')}</div>` : ''}
@@ -1706,7 +1741,11 @@ let IPHONE_TRADE_IN_RATES = [];
             totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
-            document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', sale.status !== 'Pendiente de emisión' || sale.backendSubmissionStarted);
+            const pending = sale.status === 'Pendiente de emisión';
+            document.getElementById('cancelPendingSaleBtn').classList.toggle('hidden', !pending || sale.backendSubmissionStarted);
+            document.getElementById('retryPendingSaleBtn').classList.toggle('hidden', !pending);
+            document.getElementById('printReceiptBtn').classList.toggle('hidden', pending);
+            document.getElementById('downloadReceiptBtn').classList.toggle('hidden', pending);
             document.getElementById('receiptModal').classList.remove('hidden');
         }
 
@@ -1714,7 +1753,7 @@ let IPHONE_TRADE_IN_RATES = [];
             if (pendingSaleId) {
                 const sale = SALES.find(item => item.id === pendingSaleId);
                 if (sale?.backendSubmissionStarted) {
-                    showToast('La venta ya se envió al backend. Reintenta la emisión para confirmar el resultado antes de cerrarla.');
+                    showToast('La venta ya se envió al backend. Reintenta para confirmar el resultado antes de cerrarla.');
                     return;
                 }
                 cancelPendingSale();
@@ -1723,11 +1762,24 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('receiptModal').classList.add('hidden');
         }
 
-        async function finalizePendingSale(deliveryMethod) {
+        async function finalizePendingSale() {
+            if (saleFinalizationInProgress) return false;
+            saleFinalizationInProgress = true;
+            document.getElementById('retryPendingSaleBtn').disabled = true;
+            try {
+                return await submitPendingSale();
+            } finally {
+                saleFinalizationInProgress = false;
+                document.getElementById('retryPendingSaleBtn').disabled = false;
+            }
+        }
+
+        async function submitPendingSale() {
             const sale = SALES.find(item => item.id === pendingSaleId);
             if (!sale || sale.status !== 'Pendiente de emisión' || posOperationInProgress === false) return;
             if (!sale.backendOperationId || !sale.backendPayment) {
                 showToast('Este comprobante pendiente es anterior a la integración segura. Cancélalo y registra nuevamente la venta.');
+                openReceiptModal(sale);
                 return false;
             }
             const request = {
@@ -1740,12 +1792,13 @@ let IPHONE_TRADE_IN_RATES = [];
             sale.backendSubmissionStarted = true;
             if (!persistTicketDraft()) {
                 sale.backendSubmissionStarted = false;
+                openReceiptModal(sale);
                 return false;
             }
             try {
                 const result = await callSecureFunction('recordSale', request);
                 backendCommitted = true;
-                if (!result || typeof result.ticketId !== 'string' || !Array.isArray(result.items) ||
+                if (!result || typeof result.ticketId !== 'string' || !Number.isSafeInteger(result.ticketNumber) || result.ticketNumber <= 0 || !Array.isArray(result.items) ||
                     !Number.isSafeInteger(result.subtotalCents) || !Number.isSafeInteger(result.totalCents) || !result.payment) {
                     throw new Error('El backend confirmó la venta con una respuesta inválida. Reintenta para recuperar el mismo ticket.');
                 }
@@ -1770,6 +1823,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 sale.id = result.ticketId;
                 pendingSaleId = result.ticketId;
                 sale.backendTicketId = result.ticketId;
+                sale.ticketNumber = result.ticketNumber;
                 sale.items = sale.items.map(item => {
                     const saved = result.items.find(entry => entry.id === item.id);
                     if (!saved) throw new Error('El backend devolvió un detalle de venta incompleto.');
@@ -1801,7 +1855,6 @@ let IPHONE_TRADE_IN_RATES = [];
                 sale.cardCommission = Math.max(0, result.payment.cardTotalCents - result.payment.cardNetCents) / 100;
                 sale.cardCommissionVat = 0;
                 sale.status = 'Confirmada';
-                sale.deliveryMethod = deliveryMethod;
                 await saveLocalState({ throwOnRemoteError: true });
             } catch (error) {
                 const code = (error.code || '').replace(/^functions\//, '');
@@ -1841,7 +1894,7 @@ let IPHONE_TRADE_IN_RATES = [];
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = false;
-            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Finalizar venta</span>';
             renderPOSTicket();
             renderDashboard();
             renderAccTable();
@@ -1855,11 +1908,11 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function cancelPendingSale() {
-            if (posQuoteInProgress) return;
+            if (posQuoteInProgress || saleFinalizationInProgress) return;
             const sale = SALES.find(item => item.id === pendingSaleId);
             if (!sale || sale.status !== 'Pendiente de emisión') return;
             if (sale.backendSubmissionStarted) {
-                showToast('No se puede cancelar mientras el backend puede haber registrado la venta. Reintenta la emisión primero.');
+                showToast('No se puede cancelar mientras el backend puede haber registrado la venta. Reintenta primero.');
                 return;
             }
             if (!await cancelTicketQuotes(sale.items)) return;
@@ -1876,7 +1929,7 @@ let IPHONE_TRADE_IN_RATES = [];
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
             checkoutButton.disabled = false;
-            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Emitir comprobante</span>';
+            checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Finalizar venta</span>';
             await saveLocalState();
             renderPOSTicket();
             renderDashboard();
@@ -1888,29 +1941,77 @@ let IPHONE_TRADE_IN_RATES = [];
             showToast('Venta cancelada. Se restauró el stock reservado.');
         }
 
-        async function printReceipt() {
-            if (pendingSaleId && !await finalizePendingSale('Impreso')) return;
-            window.print();
-        }
-
-        async function sendReceiptViaWhatsApp() {
-            if (!lastCreatedSale) return;
-            const popup = window.open('about:blank', '_blank');
-            if (pendingSaleId && !await finalizePendingSale('WhatsApp')) {
-                popup?.close();
+        function printReceipt() {
+            if (!lastCreatedSale || lastCreatedSale.status === 'Pendiente de emisión') {
+                showToast('Finaliza la venta antes de imprimir el comprobante.');
                 return;
             }
+            if (!getTicketNumber(lastCreatedSale)) {
+                showToast('El ticket aún no tiene número. Inicia sesión nuevamente para reintentar.');
+                return;
+            }
+            const title = document.title;
+            document.title = `Ticket-BS-${getTicketNumber(lastCreatedSale)}`;
+            try {
+                window.print();
+            } finally {
+                document.title = title;
+            }
+        }
 
-            let msg = 'BE STORE - COMPROBANTE DE COMPRA\n';
-            msg += 'N Ticket: ' + lastCreatedSale.id + '\nFecha: ' + lastCreatedSale.date + '\nCliente: ' + lastCreatedSale.customerName + '\n\n';
-            msg += 'Detalle de Productos:\n';
-            lastCreatedSale.items.forEach((item, index) => {
-                msg += (index + 1) + '. ' + item.quantity + 'x ' + item.title + ' - ' + (item.price * item.quantity).toLocaleString('es-AR') + '\n';
-            });
-            msg += '\nTotal Pagado: ' + lastCreatedSale.total.toLocaleString('es-AR') + '\n';
-            msg += 'Medio de Pago: ' + lastCreatedSale.paymentMethod + '\n\nGracias por elegir BE STORE! @bestoreok';
-            if (popup) popup.location.href = 'https://wa.me/?text=' + encodeURIComponent(msg);
-            else showToast('El navegador bloqueó la ventana de WhatsApp. Permite ventanas emergentes para enviar el comprobante.');
+        function downloadReceiptPdf() {
+            const sale = lastCreatedSale;
+            if (!sale || sale.status === 'Pendiente de emisión') {
+                showToast('Finaliza la venta antes de guardar el comprobante.');
+                return;
+            }
+            if (!getTicketNumber(sale)) {
+                showToast('El ticket aún no tiene número. Inicia sesión nuevamente para reintentar.');
+                return;
+            }
+            try {
+                if (!window.jspdf?.jsPDF) throw new Error('No se cargó la biblioteca PDF.');
+                const pdf = new window.jspdf.jsPDF();
+                let y = 20;
+                const addLine = (text, bold = false) => {
+                    pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+                    const lines = pdf.splitTextToSize(text, 180);
+                    for (const line of lines) {
+                        if (y > 275) {
+                            pdf.addPage();
+                            y = 20;
+                        }
+                        pdf.text(line, 15, y);
+                        y += 6;
+                    }
+                };
+                const moneyText = amount => `$${amount.toLocaleString('es-AR')}`;
+                pdf.setFontSize(11);
+                addLine('BE STORE - COMPROBANTE DE VENTA', true);
+                addLine('Mobile & Tech Accessories | Instagram: @bestoreok');
+                addLine(`Fecha: ${sale.date}`);
+                addLine(getTicketLabel(sale), true);
+                addLine(`Cliente: ${getSaleCustomerName(sale)}`);
+                if (sale.customerPhone && sale.customerPhone !== '-') addLine(`Teléfono: ${sale.customerPhone}`);
+                addLine(`Forma de pago: ${sale.paymentMethod}`);
+                if (sale.cardPlan) addLine(`Plan de tarjeta: ${sale.cardPlan}`);
+                if (sale.paymentVersion === 2 && sale.paymentMethod === 'Pago mixto') {
+                    addLine(`Efectivo: ${moneyText(sale.paymentBreakdown.cash)} | Transferencia: ${moneyText(sale.paymentBreakdown.transfer)} | Tarjeta: ${moneyText(sale.paymentBreakdown.card)}`);
+                }
+                y += 4;
+                sale.items.forEach(item => addLine(`${item.quantity}x ${item.title} - ${moneyText(item.price * item.quantity)}`));
+                y += 4;
+                addLine(`Subtotal: ${moneyText(sale.subtotal)}`);
+                if (sale.surcharge > 0) addLine(`Recargo tarjeta: +${moneyText(sale.surcharge)}`);
+                if (sale.canjeDeduction > 0) addLine(`Plan Canje: -${moneyText(sale.canjeDeduction)}`);
+                addLine(`TOTAL: ${moneyText(sale.total)}`, true);
+                y += 4;
+                addLine('¡Muchas gracias por tu compra en BE STORE!');
+                pdf.save(`Ticket-BS-${getTicketNumber(sale)}.pdf`);
+            } catch (error) {
+                console.error('No se pudo generar el PDF del comprobante:', error);
+                showToast('No se pudo guardar el PDF. Verifica tu conexión e inténtalo nuevamente.');
+            }
         }
 
         /* PLAN CANJE ENGINE */

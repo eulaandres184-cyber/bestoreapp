@@ -252,6 +252,81 @@ test('venta atómica, reintento idempotente y conflicto de datos', async () => {
     await assert.rejects(api.recordSale(request('seller', 'seller', { ...payload, customerName: 'Otro' })), error => error.code === 'already-exists');
 });
 
+test('los números de ticket son consecutivos, persistentes e idempotentes', async () => {
+    const { data, api, request } = fixture();
+    data.get('secure_inventory/A').stock = 2;
+    const firstRequest = request('seller', 'seller', payload);
+    const secondRequest = request('seller', 'seller', { ...payload, operationId: 'c0ffcccc-2222-4333-8444-555555555556' });
+    const [first, second] = await Promise.all([api.recordSale(firstRequest), api.recordSale(secondRequest)]);
+    assert.deepEqual([first.ticketNumber, second.ticketNumber].sort(), [1, 2]);
+    assert.equal((await api.recordSale(firstRequest)).ticketNumber, first.ticketNumber);
+    assert.equal(data.get(`secure_sales/${first.ticketId}`).ticketNumber, first.ticketNumber);
+    assert.equal(data.get(`secure_sales/${first.ticketId}`).customerName, 'Consumidor Final');
+    assert.equal(data.get('secure_counters/sale_tickets').lastTicketNumber, 2);
+});
+
+test('asigna números a ventas antiguas sin repetirlos al reintentar', async () => {
+    const { data, api, request } = fixture();
+    const id = '01234567-1234-4234-8234-012345678901';
+    data.set('app_state/main', { sales: [{ id, status: 'Confirmada' }, { id: 'TK-123', status: 'Anulada' }] });
+    data.set(`secure_sales/${id}`, { status: 'Confirmada' });
+    const req = request('seller', 'seller', { saleIds: ['TK-123', id] });
+    const first = await api.assignLegacyTicketNumbers(req);
+    const retry = await api.assignLegacyTicketNumbers(req);
+    assert.deepEqual(JSON.parse(JSON.stringify(first.numbers)), [
+        { saleId: 'TK-123', ticketNumber: 1 }, { saleId: id, ticketNumber: 2 }
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(retry.numbers)), JSON.parse(JSON.stringify(first.numbers)));
+    assert.equal(data.get(`secure_sales/${id}`).ticketNumber, 2);
+    assert.equal(data.get('secure_counters/sale_tickets').lastTicketNumber, 2);
+    const next = await api.recordSale(request('seller', 'seller', payload));
+    assert.equal(next.ticketNumber, 3);
+});
+
+test('recuperar una operación antigua usa el número asignado a su venta', async () => {
+    const { data, api, request } = fixture();
+    const req = request('seller', 'seller', payload);
+    const original = await api.recordSale(req);
+    const operation = data.get(`secure_sale_operations/seller_${operationId}`);
+    delete operation.result.ticketNumber;
+    delete data.get(`secure_sales/${original.ticketId}`).ticketNumber;
+    data.delete('secure_counters/sale_tickets');
+    data.set('app_state/main', { sales: [{ id: original.ticketId, status: 'Confirmada' }] });
+    const assigned = await api.assignLegacyTicketNumbers(request('seller', 'seller', { saleIds: [original.ticketId] }));
+    const retried = await api.recordSale(req);
+    assert.equal(retried.ticketNumber, assigned.numbers[0].ticketNumber);
+    assert.equal(data.get('secure_counters/sale_tickets').lastTicketNumber, 1);
+    assert.equal(operation.result.ticketNumber, undefined);
+    assert.equal(data.get(`secure_sale_operations/seller_${operationId}`).result.ticketNumber, 1);
+});
+
+test('la secuencia de ventas continúa después de 9999', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_counters/sale_tickets', { lastTicketNumber: 9998 });
+    data.get('secure_inventory/A').stock = 2;
+    const first = await api.recordSale(request('seller', 'seller', payload));
+    const second = await api.recordSale(request('seller', 'seller', { ...payload, operationId: 'c0ffcccc-2222-4333-8444-555555555556' }));
+    assert.equal(first.ticketNumber, 9999);
+    assert.equal(second.ticketNumber, 10000);
+    assert.equal(data.get('secure_counters/sale_tickets').lastTicketNumber, 10000);
+});
+
+test('no numera ventas ajenas al historial compartido', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { sales: [] });
+    await assert.rejects(api.assignLegacyTicketNumbers(request('seller', 'seller', { saleIds: ['inexistente'] })),
+        error => error.code === 'failed-precondition');
+    assert.equal(data.has('secure_counters/sale_tickets'), false);
+});
+
+test('un contador inválido impide registrar la venta', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_counters/sale_tickets', { lastTicketNumber: -1 });
+    await assert.rejects(api.recordSale(request('seller', 'seller', payload)), error => error.code === 'failed-precondition');
+    assert.equal(data.get('secure_inventory/A').stock, 1);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_sales/')).length, 0);
+});
+
 test('dos ventas simultáneas no venden la misma unidad', async () => {
     const { data, api, request } = fixture();
     const requests = [payload, { ...payload, operationId: 'c0ffcccc-2222-4333-8444-555555555556' }];

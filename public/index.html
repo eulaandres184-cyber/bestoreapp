@@ -16,6 +16,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js" integrity="sha384-qovJwSBbRDPP5cEjCp8S0UP66wrvnjaa60XMOGzTNanrThcrGfXfnZkvgY8N1KT3" crossorigin="anonymous"></script>
     <script src="js/app.js"></script>
 
     <!-- Google Fonts -->
@@ -439,7 +440,7 @@
                         <!-- Customer Info Box -->
                         <div class="mt-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
                             <div class="flex items-center justify-between text-xs font-bold text-slate-700">
-                                <span>Datos del Cliente (Opcional):</span>
+                                <span>Datos del Cliente (opcional; si se omite, Consumidor Final):</span>
                             </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                                 <input type="text" id="posCustomerName" list="clientsOptions" placeholder="Nombre completo" class="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
@@ -518,7 +519,7 @@
                         <!-- Complete Sale Button -->
                         <button id="posCheckoutButton" onclick="processPOSCheckout()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
                             <i class="fa-solid fa-check-circle"></i>
-                            <span>Emitir comprobante</span>
+                            <span>Finalizar venta</span>
                         </button>
                     </div>
                 </div>
@@ -1090,7 +1091,7 @@
                     <h2 class="text-base font-black tracking-wider text-slate-900">BE STORE</h2>
                     <p class="text-[10px] text-slate-500 uppercase">Mobile & Tech Accessories</p>
                     <p class="text-[10px] text-slate-500">Instagram: @bestoreok</p>
-                    <p id="receiptDate" class="text-[10px] text-slate-400 mt-1"></p>
+                    <p id="receiptDate" class="text-[10px] text-slate-400 mt-1 break-all"></p>
                 </div>
 
                 <div id="receiptCustomerInfo" class="text-[11px] space-y-0.5 border-b border-slate-300 pb-2">
@@ -1114,11 +1115,14 @@
                 <button id="cancelPendingSaleBtn" onclick="cancelPendingSale()" class="hidden bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs py-2.5 px-3 rounded-xl transition" title="Cancelar venta">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
-                <button onclick="printReceipt()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                <button id="retryPendingSaleBtn" onclick="finalizePendingSale()" class="hidden flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                    Reintentar venta
+                </button>
+                <button id="printReceiptBtn" onclick="printReceipt()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl transition">
                     <i class="fa-solid fa-print"></i> Imprimir Comprobante
                 </button>
-                <button id="sendReceiptWhatsappBtn" onclick="sendReceiptViaWhatsApp()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
-                    <i class="fa-brands fa-whatsapp"></i> Enviar por WhatsApp
+                <button id="downloadReceiptBtn" onclick="downloadReceiptPdf()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl transition">
+                    <i class="fa-solid fa-file-pdf"></i> Guardar PDF
                 </button>
             </div>
         </div>
