@@ -828,6 +828,9 @@ let IPHONE_TRADE_IN_RATES = [];
         /* ACCESSORIES TABLE LOGIC */
         function renderAccTable() {
             const body = document.getElementById('accTableBody');
+            const admin = isAdmin();
+            document.getElementById('accCostColumn').hidden = !admin;
+            document.getElementById('accCostHeader').hidden = !admin;
             const search = document.getElementById('accSearchInput').value.toLowerCase();
             const cat = document.getElementById('accCategoryFilter').value;
             const subcategory = document.getElementById('accSubcategoryFilter').value;
@@ -847,14 +850,14 @@ let IPHONE_TRADE_IN_RATES = [];
             });
 
             if (filtered.length === 0) {
-                body.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron productos en el inventario.</td></tr>`;
+                body.innerHTML = `<tr class="accessory-empty"><td colspan="${admin ? 8 : 7}" class="p-8 text-center text-slate-400">No se encontraron productos en el inventario.</td></tr>`;
                 renderAccTableTotals(filtered);
                 return;
             }
 
             body.innerHTML = filtered.map(item => `
                 <tr class="hover:bg-slate-50 transition ${item.status === 'Anulado' ? 'opacity-60 bg-slate-100' : ''}">
-                    <td class="p-3.5">
+                    <td class="accessory-title p-3.5">
                         <div class="accessory-product-cell flex items-center gap-3">
                             <div>
                                 <span class="font-bold text-slate-900 block">${item.title}</span>
@@ -862,32 +865,32 @@ let IPHONE_TRADE_IN_RATES = [];
                             </div>
                         </div>
                     </td>
-                    <td class="p-3.5 font-semibold text-slate-700">${item.brand}</td>
-                    <td class="p-3.5 font-medium text-slate-600">
+                    <td data-label="Marca" class="accessory-field p-3.5 font-semibold text-slate-700">${item.brand}</td>
+                    <td data-label="Categoría" class="accessory-field p-3.5 font-medium text-slate-600">
                         <span class="block">${getCategoryName(item.category)}</span>
                         ${['fundas', 'proteccion'].includes(item.category) ? `<span class="text-[10px] text-brand-600">${getAccessorySubcategoryName(item.category, item.subcategory)}</span>` : ''}
                     </td>
-                    <td class="p-3.5">
+                    <td data-label="Stock" class="accessory-field p-3.5">
                         <div class="accessory-stock-cell flex items-center gap-2">
                             <span class="font-bold font-mono-num text-xs ${item.stock <= item.minStock ? 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200' : 'text-slate-800'}">
                                 ${item.stock} un. ${item.status === 'Anulado' ? '<span class="ml-1 text-[9px] uppercase">Anulado</span>' : ''}
                             </span>
-                            ${isAdmin() ? `<div class="flex flex-col gap-0.5">
+                            ${admin ? `<div class="flex flex-col gap-0.5">
                                 <button onclick="quickAddStock('${item.id}', 1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">+</button>
                                 <button onclick="quickAddStock('${item.id}', -1)" class="w-4 h-4 bg-slate-200 hover:bg-slate-300 rounded text-[9px] flex items-center justify-center font-bold">-</button>
                             </div>` : ''}
                         </div>
                     </td>
-                    <td class="p-3.5 font-mono-num font-semibold text-slate-600">$${formatOptionalMoney(item.cost)}</td>
-                    <td class="p-3.5 font-mono-num font-bold text-slate-900">
+                    ${admin ? `<td data-label="Costo" class="accessory-field p-3.5 font-mono-num font-semibold text-slate-600">$${formatOptionalMoney(item.cost)}</td>` : ''}
+                    <td data-label="Lista" class="accessory-field p-3.5 font-mono-num font-bold text-slate-900">
                         ${item.currency === 'USD'
                             ? `<span class="block">USD ${formatOptionalMoney(item.priceUsd)}</span><span class="text-[10px] font-semibold text-slate-500">ARS $${formatOptionalMoney(item.price)}</span>`
                             : `$${formatOptionalMoney(item.price)}`}
                     </td>
-                    <td class="p-3.5 font-mono-num font-bold text-emerald-600">$${formatOptionalMoney(item.cashPrice)}</td>
-                    <td class="p-3.5 text-center">
+                    <td data-label="Efectivo" class="accessory-field p-3.5 font-mono-num font-bold text-emerald-600">$${formatOptionalMoney(item.cashPrice)}</td>
+                    <td class="accessory-actions p-3.5 text-center">
                         <div class="flex items-center justify-center gap-2">
-                            ${isAdmin() ? `<button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
+                            ${admin ? `<button onclick="editProduct('${item.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Editar">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
                             <button onclick="toggleProductStatus('${item.id}')" class="p-1.5 rounded-lg ${item.status === 'Anulado' ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'} text-xs" title="${item.status === 'Anulado' ? 'Reactivar producto' : 'Anular producto'}">
@@ -911,9 +914,12 @@ let IPHONE_TRADE_IN_RATES = [];
             }), { stock: 0, cost: 0, sale: 0 });
             const hasMissingCost = products.some(product => product.cost === null || product.cost === undefined || !Number.isFinite(Number(product.cost)));
             const hasMissingPrice = products.some(product => product.price === null || product.price === undefined || !Number.isFinite(Number(product.price)));
-            document.getElementById('accTableTotals').innerHTML = `
+            const totalsElement = document.getElementById('accTableTotals');
+            totalsElement.classList.toggle('sm:grid-cols-3', isAdmin());
+            totalsElement.classList.toggle('sm:grid-cols-2', !isAdmin());
+            totalsElement.innerHTML = `
                 <div><span class="block text-slate-500">Cantidad total</span><strong class="font-mono-num text-sm text-slate-900">${totals.stock} un.</strong></div>
-                <div><span class="block text-slate-500">Valor a costo</span><strong class="font-mono-num text-sm text-slate-900">${hasMissingCost ? '—' : `$${formatOptionalMoney(totals.cost)}`}</strong></div>
+                ${isAdmin() ? `<div><span class="block text-slate-500">Valor a costo</span><strong class="font-mono-num text-sm text-slate-900">${hasMissingCost ? '—' : `$${formatOptionalMoney(totals.cost)}`}</strong></div>` : ''}
                 <div><span class="block text-emerald-700">Valor a precio de lista</span><strong class="font-mono-num text-sm text-emerald-700">${hasMissingPrice ? '—' : `$${formatOptionalMoney(totals.sale)}`}</strong></div>
             `;
         }
