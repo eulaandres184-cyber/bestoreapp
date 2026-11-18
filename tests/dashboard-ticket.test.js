@@ -40,10 +40,15 @@ test('las tarjetas muestran hoy primero y acumulado en lugar del valor de acceso
     assert.doesNotMatch(header, /Nueva Venta|Cargar Producto/);
 });
 
-test('el dashboard presenta acceso destacado a venta y cajas plegadas', () => {
+test('el dashboard presenta acceso destacado a venta y tarjetas de cajas seguras', () => {
     const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
     assert.match(html, /class="dashboard-new-sale custom-card[^"]*"[^>]*>/);
-    assert.match(html, /<details class="mt-2">[\s\S]*?id="openAllRegistersButton"[\s\S]*?id="cashRegisterSummary"[\s\S]*?<\/details>/);
+    assert.match(html, /id="openAllRegistersButton"[\s\S]*?id="closeAllRegistersButton"[\s\S]*?id="allRegistersActionStatus"/);
+    assert.match(html, /custom-card bg-emerald-50\/50[^>]*>[\s\S]*?id="cashRegisterStatus"/);
+    assert.match(html, /custom-card bg-blue-50\/50[^>]*>[\s\S]*?id="transferRegisterStatus"/);
+    assert.match(html, /custom-card bg-purple-50\/50[^>]*>[\s\S]*?id="cardRegisterStatus"/);
+    assert.match(html, /id="cashRegisterSummary"/);
+    assert.doesNotMatch(html, /<details class="mt-2">[\s\S]*?id="openAllRegistersButton"/);
     assert.match(html, /order-2 lg:col-span-5 custom-card p-4/);
     assert.match(html, /order-3 lg:col-span-5 custom-card p-5[\s\S]*?Productos con Stock Crítico/);
     assert.match(html, /order-1 lg:col-span-7 lg:row-span-2 custom-card/);

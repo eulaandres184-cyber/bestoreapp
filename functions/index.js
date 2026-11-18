@@ -388,6 +388,100 @@ exports.getRegisterStatus = guarded(async request => {
     }));
 });
 
+exports.recordSupplierPayment = guarded(async request => {
+    const operationId = requestId(request.data?.operationId);
+    const amountCents = request.data?.amountCents;
+    money(amountCents, 'El pago');
+    assert(amountCents > 0, 'El importe del pago debe ser mayor que cero.');
+    const medium = request.data?.medium;
+    assert(medium === 'cash' || medium === 'transfer', 'La forma de pago debe ser efectivo o transferencia.');
+    const supplierId = request.data?.supplierId || null;
+    const payeeName = typeof request.data?.payeeName === 'string' ? request.data.payeeName.trim() : '';
+    assert(request.data?.note == null || typeof request.data.note === 'string', 'El concepto debe ser texto.');
+    const note = typeof request.data?.note === 'string' ? request.data.note.trim() : '';
+    assert(!supplierId || (typeof supplierId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(supplierId)), 'Proveedor inválido.');
+    assert(supplierId || (payeeName.length > 0 && payeeName.length <= 120), 'Indica el nombre del destinatario.');
+    assert(note.length <= 300, 'El concepto no puede superar los 300 caracteres.');
+
+    const input = { supplierId, payeeName: supplierId ? null : payeeName, amountCents, medium, note };
+    const hash = fingerprint(input);
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const stateRef = db.doc('app_state/main');
+    const registerRef = db.doc(`secure_registers/${medium}`);
+    const operationRef = db.doc(`secure_supplier_payment_operations/${request.auth.uid}_${operationId}`);
+    const paymentRef = db.collection('secure_supplier_payments').doc();
+    const movementRef = db.collection('secure_cash_movements').doc();
+
+    return db.runTransaction(async tx => {
+        const [profile, state, register, operation] = await Promise.all([
+            tx.get(profileRef), tx.get(stateRef), tx.get(registerRef), tx.get(operationRef)
+        ]);
+        authorize(request, profile, true);
+        if (operation.exists) {
+            assert(operation.data().fingerprint === hash, 'El identificador de operación ya fue usado con otros datos.', 'already-exists');
+            return operation.data().result;
+        }
+
+        assert(state.exists, 'No se encontró el estado de proveedores.', 'failed-precondition');
+        let recipient = payeeName;
+        if (supplierId) {
+            const suppliers = state.data().suppliers || [];
+            assert(Array.isArray(suppliers), 'La lista de proveedores no es válida.', 'failed-precondition');
+            const supplier = suppliers.find(item => item && item.id === supplierId);
+            assert(supplier && typeof supplier.name === 'string' && supplier.name.trim(), 'El proveedor seleccionado ya no existe.', 'failed-precondition');
+            recipient = supplier.name.trim();
+        }
+        assert(recipient.length > 0 && recipient.length <= 120, 'El nombre del destinatario no es válido.', 'failed-precondition');
+        assert(register.exists && register.data().open === true, `La caja de ${medium === 'cash' ? 'efectivo' : 'transferencia'} debe estar abierta.`, 'failed-precondition');
+        const registerData = register.data();
+        money(registerData.balanceCents, 'El saldo de caja');
+        assert(registerData.balanceCents >= amountCents, 'El saldo de la caja es insuficiente.', 'failed-precondition');
+        assert(typeof registerData.sessionId === 'string' && registerData.sessionId.length > 0, 'La caja no tiene una sesión válida.', 'failed-precondition');
+
+        const sessionRef = db.doc(`secure_register_sessions/${registerData.sessionId}`);
+        const session = await tx.get(sessionRef);
+        assert(session.exists && session.data().open === true && session.data().medium === medium,
+            'La sesión de caja no está abierta o no coincide con la forma de pago.', 'failed-precondition');
+        money(session.data().balanceCents, 'El saldo de la sesión');
+        assert(session.data().balanceCents === registerData.balanceCents,
+            'El saldo de la caja y su sesión no coinciden.', 'failed-precondition');
+
+        const result = {
+            paymentId: paymentRef.id, payeeName: recipient, supplierId,
+            amountCents, medium, note
+        };
+        const timestamp = FieldValue.serverTimestamp();
+        tx.update(registerRef, { balanceCents: registerData.balanceCents - amountCents, updatedAt: timestamp });
+        tx.update(sessionRef, { balanceCents: session.data().balanceCents - amountCents, updatedAt: timestamp });
+        tx.create(paymentRef, {
+            ...result, createdBy: request.auth.uid, createdAt: timestamp
+        });
+        tx.create(movementRef, {
+            medium, amountCents: -amountCents, sessionId: registerData.sessionId,
+            supplierPaymentId: paymentRef.id, payeeName: recipient, note,
+            createdBy: request.auth.uid, createdAt: timestamp
+        });
+        tx.create(operationRef, { fingerprint: hash, result, createdAt: timestamp });
+        return result;
+    });
+});
+
+exports.listSupplierPayments = guarded(async request => {
+    const profile = await db.doc(`users/${request.auth.uid}`).get();
+    authorize(request, profile, true);
+    const snapshot = await db.collection('secure_supplier_payments').get();
+    return snapshot.docs.map(document => {
+        const payment = document.data();
+        const createdAt = payment.createdAt && typeof payment.createdAt.toDate === 'function'
+            ? payment.createdAt.toDate().toISOString()
+            : null;
+        return {
+            id: document.id, payeeName: payment.payeeName, amountCents: payment.amountCents,
+            medium: payment.medium, note: payment.note || '', createdAt
+        };
+    }).sort((first, second) => (second.createdAt || '').localeCompare(first.createdAt || ''));
+});
+
 exports.closeAllRegisters = guarded(async request => {
     const countedCentsByMedium = request.data?.countedCentsByMedium;
     assert(countedCentsByMedium && typeof countedCentsByMedium === 'object',

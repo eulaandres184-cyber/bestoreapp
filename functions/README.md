@@ -44,6 +44,12 @@ controlado de los clientes anteriores.
   desde el backend nuevo.
 - `listInventory` y `getRegisterStatus`: la app consulta los artículos y saldos
   seguros para mostrar existencias y permitir que caja valide la disponibilidad.
+- `recordSupplierPayment` y `listSupplierPayments`: solo administradores pueden
+  registrar egresos extra a proveedores o destinatarios libres, en efectivo o
+  transferencia. La operación exige caja y sesión abiertas con saldo suficiente,
+  descuenta ambas en una transacción, registra el movimiento y es idempotente por
+  `operationId`. El historial se consulta mediante callable; no habilita lectura
+  directa de las colecciones seguras.
 - `getSalesSummary`: calcula en una lectura consistente las operaciones y la
   facturación bruta de hoy en horario de Argentina, y el acumulado neto de
   ventas confirmadas menos devoluciones registradas. Incluye ventas anteriores

@@ -137,6 +137,8 @@ let IPHONE_TRADE_IN_RATES = [];
         let SALES = [];
         let CLIENTS = [];
         let SUPPLIERS = [];
+        let supplierPaymentsRequest = 0;
+        let supplierPaymentPendingRestoredFor = null;
         let cashRegister = { date: '', openingCash: 0, open: false };
         let secureRegisters = {
             cash: { open: false, balanceCents: 0, openingCents: 0 },
@@ -204,6 +206,18 @@ let IPHONE_TRADE_IN_RATES = [];
             button.setAttribute('title', isPassword ? 'Ocultar contraseña' : 'Mostrar contraseña');
         }
 
+        function setLoginLoading(isLoading) {
+            const form = document.getElementById('loginForm');
+            const credentials = document.getElementById('loginCredentials');
+            form.querySelectorAll('input, button').forEach(control => {
+                control.disabled = isLoading;
+            });
+            credentials.classList.toggle('opacity-50', isLoading);
+            document.getElementById('loginLoadingSpinner').classList.toggle('hidden', !isLoading);
+            document.getElementById('loginSubmitLabel').textContent = isLoading ? 'Ingresando…' : 'Ingresar';
+            document.getElementById('loginSubmitButton').setAttribute('aria-busy', String(isLoading));
+        }
+
         async function initializeAuthentication() {
             try {
                 const users = await db.collection('users').limit(1).get();
@@ -232,6 +246,7 @@ let IPHONE_TRADE_IN_RATES = [];
         async function loginUser(event) {
             event.preventDefault();
             const nick = document.getElementById('loginNick').value.trim();
+            setLoginLoading(true);
             try {
                 const credential = await firebase.auth().signInWithEmailAndPassword(nickEmail(nick), document.getElementById('loginPassword').value);
                 await finishLogin(credential.user);
@@ -243,6 +258,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('authScreen').classList.remove('hidden');
                 const isCredentialError = typeof error.code === 'string' && error.code.startsWith('auth/');
                 showAuthMessage(isCredentialError ? 'Nick o clave incorrectos.' : (error.message || 'No se pudo iniciar sesión. Intenta nuevamente.'));
+            } finally {
+                setLoginLoading(false);
             }
         }
 
@@ -394,6 +411,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('passwordUserId').value = userId;
                 document.getElementById('passwordUserNick').textContent = user.data().nick;
                 document.getElementById('passwordNewValue').value = '';
+                resetPasswordVisibility('passwordNewValue', 'togglePasswordNewValue');
                 document.getElementById('changePasswordForm').classList.remove('hidden');
             } catch (error) {
                 console.error('No se pudo consultar el usuario:', error);
@@ -405,6 +423,12 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('changePasswordForm').classList.add('hidden');
             document.getElementById('passwordUserId').value = '';
             document.getElementById('passwordNewValue').value = '';
+            resetPasswordVisibility('passwordNewValue', 'togglePasswordNewValue');
+        }
+
+        function resetPasswordVisibility(inputId, buttonId) {
+            const input = document.getElementById(inputId);
+            if (input.type !== 'password') togglePasswordVisibility(inputId, buttonId);
         }
 
         async function changeUserPassword(event) {
@@ -566,6 +590,11 @@ let IPHONE_TRADE_IN_RATES = [];
                 renderClients();
             } else if (tabId === 'suppliers') {
                 renderSuppliers();
+                refreshSupplierPayments();
+                refreshSecureRegisters().catch(error => {
+                    console.error('No se pudo actualizar el estado de las cajas:', error);
+                    showToast(error.message || 'No se pudo consultar el estado de las cajas.');
+                });
             }
         }
 
@@ -1574,6 +1603,7 @@ let IPHONE_TRADE_IN_RATES = [];
             secureRegisters = statuses;
             secureRegistersLoaded = true;
             renderSecureRegisterStatus();
+            renderCashRegister();
         }
 
         function renderSecureRegisterStatus() {
@@ -2526,6 +2556,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 body.innerHTML = '';
                 return;
             }
+            renderSupplierPaymentRecipientOptions();
+            restoreSupplierPaymentPending();
 
             const query = (document.getElementById('supplierSearch')?.value || '').trim().toLocaleLowerCase('es-AR');
             const visibleSuppliers = SUPPLIERS.filter(supplier =>
@@ -2553,6 +2585,183 @@ let IPHONE_TRADE_IN_RATES = [];
                     </td>
                 </tr>`;
             }).join('') || `<tr><td colspan="6" class="p-6 text-center text-slate-400">${query ? 'No se encontraron proveedores con esa búsqueda.' : 'No hay proveedores registrados.'}</td></tr>`;
+        }
+
+        function renderSupplierPaymentRecipientOptions() {
+            const select = document.getElementById('supplierPaymentRecipient');
+            if (!select) return;
+            const selectedValue = select.value;
+            select.innerHTML = '<option value="other">Otro destinatario</option>' + SUPPLIERS
+                .map(supplier => `<option value="${escapeSupplierHtml(supplier.id)}">${escapeSupplierHtml(supplier.name)}</option>`)
+                .join('');
+            select.value = SUPPLIERS.some(supplier => supplier.id === selectedValue) ? selectedValue : 'other';
+            updateSupplierPaymentRecipient();
+        }
+
+        function updateSupplierPaymentRecipient() {
+            const select = document.getElementById('supplierPaymentRecipient');
+            const nameInput = document.getElementById('supplierPaymentOtherName');
+            if (!select || !nameInput) return;
+            const isOther = select.value === 'other';
+            nameInput.classList.toggle('hidden', !isOther);
+            nameInput.required = isOther;
+        }
+
+        function supplierPaymentPendingKey() {
+            const user = firebase.auth().currentUser;
+            if (!user) throw new Error('La sesión venció. Inicia sesión nuevamente para registrar el pago.');
+            return `bestore_supplier_payment_pending_${user.uid}`;
+        }
+
+        function restoreSupplierPaymentPending() {
+            try {
+                const key = supplierPaymentPendingKey();
+                const uid = firebase.auth().currentUser.uid;
+                if (supplierPaymentPendingRestoredFor === uid) return;
+                supplierPaymentPendingRestoredFor = uid;
+                const stored = localStorage.getItem(key);
+                if (!stored) return;
+                const pending = JSON.parse(stored);
+                if (!pending || !/^[a-f0-9-]{36}$/i.test(pending.operationId || '') ||
+                    !Number.isSafeInteger(pending.amountCents) || pending.amountCents <= 0 ||
+                    !['cash', 'transfer'].includes(pending.medium) ||
+                    (pending.supplierId != null && (typeof pending.supplierId !== 'string' ||
+                        !/^[A-Za-z0-9_-]{1,100}$/.test(pending.supplierId))) ||
+                    typeof pending.payeeName !== 'string' || pending.payeeName.length > 120 ||
+                    typeof pending.note !== 'string' || pending.note.length > 300) {
+                    throw new Error('Hay un pago pendiente local con datos inválidos. Contacta a un administrador antes de continuar.');
+                }
+                const supplier = SUPPLIERS.find(item => item.id === pending.supplierId);
+                document.getElementById('supplierPaymentRecipient').value = supplier ? supplier.id : 'other';
+                document.getElementById('supplierPaymentOtherName').value = pending.payeeName;
+                document.getElementById('supplierPaymentAmount').value = (pending.amountCents / 100).toFixed(2);
+                document.getElementById('supplierPaymentMedium').value = pending.medium;
+                document.getElementById('supplierPaymentNote').value = pending.note;
+                updateSupplierPaymentRecipient();
+                document.getElementById('supplierPaymentMessage').textContent =
+                    'Hay un pago pendiente. Al enviarlo se reintentará la misma operación para evitar un débito duplicado.';
+            } catch (error) {
+                console.error('No se pudo recuperar el pago pendiente al proveedor:', error);
+                showToast(error.message || 'No se pudo recuperar el pago pendiente.');
+            }
+        }
+
+        async function saveSupplierPayment(event) {
+            event.preventDefault();
+            if (!requireAdmin()) return;
+
+            const button = document.getElementById('supplierPaymentSubmitButton');
+            const message = document.getElementById('supplierPaymentMessage');
+            let key;
+            let pending;
+            try {
+                key = supplierPaymentPendingKey();
+                const stored = localStorage.getItem(key);
+                pending = stored ? JSON.parse(stored) : null;
+                if (pending && (!/^[a-f0-9-]{36}$/i.test(pending.operationId || '') ||
+                    !Number.isSafeInteger(pending.amountCents) || pending.amountCents <= 0 ||
+                    !['cash', 'transfer'].includes(pending.medium) ||
+                    (pending.supplierId != null && (typeof pending.supplierId !== 'string' ||
+                        !/^[A-Za-z0-9_-]{1,100}$/.test(pending.supplierId))) ||
+                    typeof pending.payeeName !== 'string' || pending.payeeName.length > 120 ||
+                    typeof pending.note !== 'string' || pending.note.length > 300)) {
+                    throw new Error('Hay un pago pendiente local con datos inválidos. Contacta a un administrador antes de continuar.');
+                }
+                if (!pending) {
+                    const rawAmount = Number(document.getElementById('supplierPaymentAmount').value);
+                    const amountCents = Math.round(rawAmount * 100);
+                    if (!Number.isFinite(rawAmount) || rawAmount <= 0 || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
+                        showToast('Ingresa un importe válido mayor que cero.');
+                        return;
+                    }
+                    const selectedId = document.getElementById('supplierPaymentRecipient').value;
+                    const supplier = SUPPLIERS.find(item => item.id === selectedId);
+                    const otherName = document.getElementById('supplierPaymentOtherName').value.trim();
+                    if (selectedId !== 'other' && !supplier) {
+                        showToast('Selecciona un proveedor válido.');
+                        return;
+                    }
+                    if (!supplier && !otherName) {
+                        showToast('Indica el nombre del destinatario.');
+                        return;
+                    }
+                    pending = {
+                        operationId: createOperationId(),
+                        supplierId: supplier ? supplier.id : null,
+                        payeeName: supplier ? supplier.name : otherName,
+                        amountCents,
+                        medium: document.getElementById('supplierPaymentMedium').value,
+                        note: document.getElementById('supplierPaymentNote').value.trim()
+                    };
+                    localStorage.setItem(key, JSON.stringify(pending));
+                } else {
+                    message.textContent = 'Se reintentará el pago anterior pendiente para evitar un débito duplicado.';
+                }
+            } catch (error) {
+                console.error('No se pudo preparar el pago al proveedor:', error);
+                showToast(error.message || 'No se pudo guardar la solicitud del pago.');
+                return;
+            }
+
+            button.disabled = true;
+            try {
+                await callSecureFunction('recordSupplierPayment', pending);
+                localStorage.removeItem(key);
+                document.getElementById('supplierPaymentForm').reset();
+                updateSupplierPaymentRecipient();
+                message.textContent = 'Pago registrado y descontado de la caja segura.';
+                showToast('Pago extra registrado correctamente.');
+            } catch (error) {
+                console.error('No se pudo registrar el pago al proveedor:', error);
+                const code = String(error.code || '').replace(/^functions\//, '');
+                if (['failed-precondition', 'invalid-argument'].includes(code)) {
+                    localStorage.removeItem(key);
+                    message.textContent = 'El pago no se registró. Corrige los datos o verifica que la caja esté abierta y tenga saldo suficiente.';
+                } else {
+                    message.textContent = 'No se confirmó el pago. Puedes reintentar sin generar un débito duplicado.';
+                }
+                showToast(error.message || 'No se pudo registrar el pago extra.');
+                return;
+            } finally {
+                button.disabled = false;
+            }
+            await Promise.all([refreshSupplierPayments(), refreshSecureRegisters().catch(error => {
+                console.error('El pago se registró, pero no se pudo actualizar el estado de las cajas:', error);
+                showToast('El pago se registró, pero no se pudo actualizar el saldo visible de la caja.');
+            })]);
+        }
+
+        async function refreshSupplierPayments() {
+            const body = document.getElementById('supplierPaymentsTableBody');
+            if (!body || !isAdmin()) return;
+            const request = ++supplierPaymentsRequest;
+            body.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">Cargando pagos…</td></tr>';
+            try {
+                const payments = await callSecureFunction('listSupplierPayments');
+                if (!Array.isArray(payments)) throw new Error('El backend devolvió un historial de pagos inválido.');
+                if (request !== supplierPaymentsRequest) return;
+                body.innerHTML = payments.map(payment => {
+                    const timestamp = payment.createdAt ? new Date(payment.createdAt) : null;
+                    const date = timestamp && !Number.isNaN(timestamp.getTime())
+                        ? timestamp.toLocaleString('es-AR') : 'Fecha no disponible';
+                    const medium = payment.medium === 'cash' ? 'Efectivo'
+                        : payment.medium === 'transfer' ? 'Transferencia' : 'Desconocido';
+                    const amount = Number.isSafeInteger(payment.amountCents)
+                        ? `$${(payment.amountCents / 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Importe inválido';
+                    return `<tr class="border-b border-slate-100">
+                        <td class="p-3 whitespace-nowrap">${escapeSupplierHtml(date)}</td>
+                        <td class="p-3 font-semibold">${escapeSupplierHtml(payment.payeeName)}</td>
+                        <td class="p-3">${medium}</td>
+                        <td class="p-3 whitespace-pre-wrap">${escapeSupplierHtml(payment.note) || '-'}</td>
+                        <td class="p-3 text-right font-bold text-red-700">${amount}</td>
+                    </tr>`;
+                }).join('') || '<tr><td colspan="5" class="p-6 text-center text-slate-400">Todavía no hay pagos extras registrados.</td></tr>';
+            } catch (error) {
+                if (request !== supplierPaymentsRequest) return;
+                console.error('No se pudo consultar el historial de pagos a proveedores:', error);
+                body.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-red-600">No se pudo cargar el historial de pagos.</td></tr>';
+                showToast(error.message || 'No se pudo consultar el historial de pagos.');
+            }
         }
 
         async function saveSupplier(event) {

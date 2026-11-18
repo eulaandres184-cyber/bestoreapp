@@ -517,6 +517,86 @@ test('solo un administrador abre y cierra las tres cajas de forma conjunta', asy
     }
 });
 
+test('pago extra en efectivo descuenta caja y sesión y no se duplica al reintentar', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { suppliers: [{ id: 'SUP-1', name: 'Proveedor Uno' }] });
+    data.set('secure_registers/cash', { open: true, sessionId: 'cash-payment-session', balanceCents: 5000 });
+    data.set('secure_register_sessions/cash-payment-session', {
+        open: true, medium: 'cash', balanceCents: 5000
+    });
+    const payment = {
+        operationId: 'c0ffcccc-2222-4333-8444-555555555560',
+        supplierId: 'SUP-1', payeeName: '', amountCents: 1500, medium: 'cash', note: 'Flete'
+    };
+
+    await assert.rejects(api.recordSupplierPayment(request('seller', 'seller', payment)),
+        error => error.code === 'permission-denied');
+    const result = await api.recordSupplierPayment(request('admin', 'admin', payment));
+    const retry = await api.recordSupplierPayment(request('admin', 'admin', payment));
+    assert.equal(result.paymentId, retry.paymentId);
+    assert.equal(result.amountCents, retry.amountCents);
+    assert.equal(result.payeeName, 'Proveedor Uno');
+    assert.equal(data.get('secure_registers/cash').balanceCents, 3500);
+    assert.equal(data.get('secure_register_sessions/cash-payment-session').balanceCents, 3500);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_supplier_payments/')).length, 1);
+    const movement = [...data.entries()].find(([key]) => key.startsWith('secure_cash_movements/'))[1];
+    assert.equal(movement.amountCents, -1500);
+    assert.equal(movement.supplierPaymentId, result.paymentId);
+    await assert.rejects(api.recordSupplierPayment(request('admin', 'admin', {
+        ...payment, amountCents: 2000
+    })), error => error.code === 'already-exists');
+    assert.equal(data.get('secure_registers/cash').balanceCents, 3500);
+});
+
+test('pago extra por transferencia admite destinatario libre e historial solo para administradores', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { suppliers: [] });
+    data.set('secure_registers/transfer', { open: true, sessionId: 'transfer-payment-session', balanceCents: 4000 });
+    data.set('secure_register_sessions/transfer-payment-session', {
+        open: true, medium: 'transfer', balanceCents: 4000
+    });
+    const payment = {
+        operationId: 'c0ffcccc-2222-4333-8444-555555555561',
+        supplierId: null, payeeName: 'Técnico', amountCents: 2500, medium: 'transfer', note: ''
+    };
+
+    const result = await api.recordSupplierPayment(request('admin', 'admin', payment));
+    assert.equal(result.payeeName, 'Técnico');
+    assert.equal(data.get('secure_registers/transfer').balanceCents, 1500);
+    assert.equal(data.get('secure_register_sessions/transfer-payment-session').balanceCents, 1500);
+    const history = await api.listSupplierPayments(request('admin', 'admin'));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].payeeName, 'Técnico');
+    assert.equal(history[0].medium, 'transfer');
+    await assert.rejects(api.listSupplierPayments(request('seller', 'seller')), error => error.code === 'permission-denied');
+});
+
+test('pago extra falla de forma atómica si la caja está cerrada, no tiene saldo o la sesión no coincide', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { suppliers: [] });
+    const payment = {
+        operationId: 'c0ffcccc-2222-4333-8444-555555555562',
+        payeeName: 'Destinatario', amountCents: 100, medium: 'cash', note: ''
+    };
+
+    data.get('secure_registers/cash').open = false;
+    await assert.rejects(api.recordSupplierPayment(request('admin', 'admin', payment)),
+        error => error.code === 'failed-precondition');
+    data.get('secure_registers/cash').open = true;
+    await assert.rejects(api.recordSupplierPayment(request('admin', 'admin', payment)),
+        error => error.code === 'failed-precondition');
+    assert.equal(data.get('secure_registers/cash').balanceCents, 0);
+
+    data.get('secure_registers/cash').balanceCents = 500;
+    data.get('secure_register_sessions/session').medium = 'transfer';
+    await assert.rejects(api.recordSupplierPayment(request('admin', 'admin', payment)),
+        error => error.code === 'failed-precondition');
+    assert.equal(data.get('secure_registers/cash').balanceCents, 500);
+    assert.equal(data.get('secure_register_sessions/session').balanceCents, 0);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_supplier_payments/')).length, 0);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_cash_movements/')).length, 0);
+});
+
 test('no abre por partes y permite cerrar juntas las cajas que aún estén abiertas', async () => {
     const { data, api, request } = fixture();
     const openingPayload = { openingCentsByMedium: { cash: 0, transfer: 0, card: 0 } };
