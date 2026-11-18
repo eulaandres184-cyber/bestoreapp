@@ -61,8 +61,12 @@ controlado de los clientes anteriores.
   custom claim del usuario, revoca sus tokens y registra el cambio. El primer
   administrador todavía se debe habilitar con `set-role.js`.
 - `setUserPassword`: exclusivamente la cuenta BeStore identificada por UID y
-  con rol administrativo activo puede asignar una nueva clave a otro usuario.
-  La operación se audita sin guardar la clave y revoca sus sesiones.
+  con rol administrativo activo puede asignar una nueva clave a otro usuario,
+  administrador o vendedor. Firebase aplica la clave durante la llamada y se
+  revocan los tokens de renovación. La operación se audita sin guardar la clave.
+  Si falla un paso posterior al cambio, el aviso indica que la clave ya se
+  aplicó y proporciona el identificador de auditoría. Los tokens de acceso ya
+  emitidos pueden seguir siendo válidos hasta que caduquen.
 - `getEditableSale` y `editSale`: un administrador consulta y corrige ventas
   seguras confirmadas sin devoluciones. Se requiere motivo y revisión vigente;
   la operación ajusta stock y saldos de las sesiones actuales, actualiza el

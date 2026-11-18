@@ -7,7 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const domain = require('../domain');
 
-function fixture() {
+function fixture(options = {}) {
     const data = new Map([
         ['users/admin', { active: true, role: 'admin' }],
         ['users/seller', { active: true, role: 'seller', nick: 'Vendedor' }],
@@ -24,6 +24,7 @@ function fixture() {
         id: path.split('/').pop(),
         get: async () => ({ exists: data.has(path), data: () => structuredClone(data.get(path)) }),
         update: async value => {
+            if (options.failAuditUpdate && path.startsWith('secure_password_changes/')) throw new Error('Audit unavailable');
             if (!data.has(path)) throw new Error('Missing document');
             data.set(path, { ...data.get(path), ...value });
         }
@@ -93,7 +94,7 @@ function fixture() {
     };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8'), context);
     const request = (uid, role, payload) => ({ auth: { uid, token: { bestoreRole: role } }, data: payload });
-    return { data, api: context.exports, request, claims, passwords };
+    return { data, api: context.exports, request, claims, passwords, auth };
 }
 
 const operationId = 'c0ffcccc-2222-4333-8444-555555555555';
@@ -108,10 +109,45 @@ test('solo BeStore puede modificar la clave de otro usuario y se registra sin gu
     await assert.rejects(api.setUserPassword(request(uid, 'admin', { uid: 'seller', password: 'corta' })), error => error.code === 'invalid-argument');
     await api.setUserPassword(request(uid, 'admin', { uid: 'seller', password: 'clave123' }));
     assert.equal(passwords.get('seller'), 'clave123');
+    await api.setUserPassword(request(uid, 'admin', { uid: 'admin', password: 'clave456' }));
+    assert.equal(passwords.get('admin'), 'clave456');
     const audit = [...data.entries()].find(([key]) => key.startsWith('secure_password_changes/'))[1];
     assert.equal(audit.status, 'applied');
     assert.equal(JSON.stringify(audit).includes('clave123'), false);
     await assert.rejects(api.setUserRole(request('admin', 'admin', { uid, role: 'seller' })), error => error.code === 'permission-denied');
+});
+
+test('el cambio de clave informa los errores de Firebase sin revelar la clave', async () => {
+    const { data, api, request, auth } = fixture();
+    const uid = '67V2bdleU2bZaazTtoZUvafJTsL2';
+    data.set(`users/${uid}`, { active: true, role: 'admin' });
+    auth.updateUser = async () => { throw Object.assign(new Error('rejected'), { code: 'auth/invalid-password' }); };
+    await assert.rejects(api.setUserPassword(request(uid, 'admin', { uid: 'seller', password: 'clave123' })),
+        error => error.code === 'failed-precondition' && /Firebase rechazó la clave/.test(error.message));
+    const audit = [...data.entries()].find(([key]) => key.startsWith('secure_password_changes/'))[1];
+    assert.equal(audit.status, 'pending');
+    assert.equal(JSON.stringify(audit).includes('clave123'), false);
+});
+
+test('si falla la revocación indica que la clave ya cambió y no asegura cierre de sesión', async () => {
+    const { data, api, request, auth, passwords } = fixture();
+    const uid = '67V2bdleU2bZaazTtoZUvafJTsL2';
+    data.set(`users/${uid}`, { active: true, role: 'admin' });
+    auth.revokeRefreshTokens = async () => { throw Object.assign(new Error('failure'), { code: 'auth/internal-error' }); };
+    await assert.rejects(api.setUserPassword(request(uid, 'admin', { uid: 'admin', password: 'clave123' })),
+        error => error.code === 'internal' && /clave nueva ya fue aplicada/.test(error.message) && /sesiones anteriores/.test(error.message));
+    assert.equal(passwords.get('admin'), 'clave123');
+    const audit = [...data.entries()].find(([key]) => key.startsWith('secure_password_changes/'))[1];
+    assert.equal(audit.status, 'pending');
+});
+
+test('si falla la auditoría final informa que la clave y revocación sí se aplicaron', async () => {
+    const { data, api, request, passwords } = fixture({ failAuditUpdate: true });
+    const uid = '67V2bdleU2bZaazTtoZUvafJTsL2';
+    data.set(`users/${uid}`, { active: true, role: 'admin' });
+    await assert.rejects(api.setUserPassword(request(uid, 'admin', { uid: 'seller', password: 'clave123' })),
+        error => error.code === 'internal' && /clave nueva ya fue aplicada/.test(error.message) && /auditoría/.test(error.message));
+    assert.equal(passwords.get('seller'), 'clave123');
 });
 
 test('la devolución está exportada al iniciar el backend', () => {

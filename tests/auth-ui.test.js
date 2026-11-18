@@ -102,3 +102,43 @@ test('los controles para mostrar clave están presentes en los formularios corre
     assert.match(html, /id="loginLoadingSpinner"[^>]*fa-spinner fa-spin/);
     assert.match(html, /id="loginCredentials" class="space-y-3 transition-opacity"/);
 });
+
+test('el cambio de clave informa éxito y evita envíos simultáneos', async () => {
+    const { context } = createApp();
+    context.requireAdmin = () => true;
+    context.firebase.auth = () => ({ currentUser: { uid: '67V2bdleU2bZaazTtoZUvafJTsL2' } });
+    context.document.getElementById('passwordUserId').value = 'admin';
+    context.document.getElementById('passwordNewValue').value = 'clave123';
+    context.document.getElementById('passwordNewValue').type = 'password';
+    let resolveCall;
+    let count = 0;
+    context.callSecureFunction = () => { count++; return new Promise(resolve => { resolveCall = resolve; }); };
+    const shown = [];
+    context.showPasswordResult = (title, message) => shown.push({ title, message });
+    const first = context.changeUserPassword({ preventDefault() {} });
+    await context.changeUserPassword({ preventDefault() {} });
+    assert.equal(count, 1);
+    assert.equal(context.document.getElementById('changePasswordSubmit').disabled, true);
+    resolveCall({ uid: 'admin', operationId: 'operation' });
+    await first;
+    assert.equal(shown[0].title, 'Clave actualizada');
+    assert.match(shown[0].message, /se aplicó correctamente/);
+    assert.equal(context.document.getElementById('passwordNewValue').value, '');
+    assert.equal(context.document.getElementById('changePasswordSubmit').disabled, false);
+});
+
+test('el error internal genérico muestra una explicación y conserva el formulario', async () => {
+    const { context } = createApp();
+    context.requireAdmin = () => true;
+    context.firebase.auth = () => ({ currentUser: { uid: '67V2bdleU2bZaazTtoZUvafJTsL2' } });
+    context.document.getElementById('passwordUserId').value = 'seller';
+    context.document.getElementById('passwordNewValue').value = 'clave123';
+    context.console = { error() {} };
+    context.callSecureFunction = async () => { throw Object.assign(new Error('internal'), { code: 'functions/internal' }); };
+    const shown = [];
+    context.showPasswordResult = (title, message) => shown.push({ title, message });
+    await context.changeUserPassword({ preventDefault() {} });
+    assert.match(shown[0].title, /No se pudo confirmar/);
+    assert.match(shown[0].message, /Comprueba el acceso con la nueva clave/);
+    assert.equal(context.document.getElementById('passwordNewValue').value, 'clave123');
+});

@@ -165,6 +165,8 @@ let IPHONE_TRADE_IN_RATES = [];
         let pendingSaleId = null;
         let posOperationInProgress = false;
         let saleFinalizationInProgress = false;
+        let passwordChangeInProgress = false;
+        let passwordResultPreviousFocus = null;
         let posQuoteInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
@@ -384,6 +386,7 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function closeUserModal() {
+            if (passwordChangeInProgress) return;
             document.getElementById('userModal').classList.add('hidden');
             cancelUserEdit();
             cancelPasswordEdit();
@@ -404,6 +407,7 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function startPasswordEdit(userId) {
+            if (passwordChangeInProgress) return;
             if (!requireAdmin() || firebase.auth().currentUser?.uid !== '67V2bdleU2bZaazTtoZUvafJTsL2') return;
             try {
                 const user = await db.collection('users').doc(userId).get();
@@ -420,6 +424,7 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function cancelPasswordEdit() {
+            if (passwordChangeInProgress) return;
             document.getElementById('changePasswordForm').classList.add('hidden');
             document.getElementById('passwordUserId').value = '';
             document.getElementById('passwordNewValue').value = '';
@@ -431,24 +436,73 @@ let IPHONE_TRADE_IN_RATES = [];
             if (input.type !== 'password') togglePasswordVisibility(inputId, buttonId);
         }
 
+        function showPasswordResult(title, message) {
+            passwordResultPreviousFocus = document.activeElement;
+            document.getElementById('passwordResultTitle').textContent = title;
+            document.getElementById('passwordResultMessage').textContent = message;
+            document.getElementById('passwordResultModal').classList.remove('hidden');
+            document.getElementById('passwordResultAccept').focus();
+        }
+
+        function closePasswordResult() {
+            document.getElementById('passwordResultModal').classList.add('hidden');
+            if (passwordResultPreviousFocus?.isConnected && passwordResultPreviousFocus.getClientRects().length) {
+                passwordResultPreviousFocus.focus();
+            } else {
+                document.getElementById('closeUserModalButton').focus();
+            }
+            passwordResultPreviousFocus = null;
+        }
+
+        function handlePasswordResultKey(event) {
+            if (event.key === 'Escape') closePasswordResult();
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                document.getElementById('passwordResultAccept').focus();
+            }
+        }
+
+        function passwordChangeErrorMessage(error) {
+            const code = String(error.code || '').replace(/^functions\//, '').toLowerCase();
+            const message = typeof error.message === 'string' ? error.message.trim() : '';
+            if (message && !/^(internal|unknown|unavailable|deadline-exceeded|not-found)$/i.test(message)) return message;
+            if (code === 'unauthenticated') return 'La sesión venció. Inicia sesión nuevamente antes de cambiar la clave.';
+            if (code === 'permission-denied') return 'Solo el superusuario BeStore activo puede cambiar claves.';
+            if (code === 'not-found') return 'No se encontró la función para cambiar claves. Verifica que el backend esté desplegado.';
+            return 'No se pudo confirmar el cambio de clave. Comprueba el acceso con la nueva clave antes de reintentar y verifica la conexión con el servidor.';
+        }
+
         async function changeUserPassword(event) {
             event.preventDefault();
             if (!requireAdmin() || firebase.auth().currentUser?.uid !== '67V2bdleU2bZaazTtoZUvafJTsL2') return;
-            const button = event.submitter;
-            if (button) button.disabled = true;
+            if (passwordChangeInProgress) return;
+            const button = document.getElementById('changePasswordSubmit');
+            const uid = document.getElementById('passwordUserId').value;
+            passwordChangeInProgress = true;
+            button.disabled = true;
+            button.textContent = 'Cambiando clave…';
+            let success = false;
+            let resultMessage;
             try {
-                await callSecureFunction('setUserPassword', {
-                    uid: document.getElementById('passwordUserId').value,
+                const result = await callSecureFunction('setUserPassword', {
+                    uid,
                     password: document.getElementById('passwordNewValue').value
                 });
-                cancelPasswordEdit();
-                showToast('Clave actualizada. El usuario debe volver a iniciar sesión.');
+                if (!result || result.uid !== uid || !result.operationId) {
+                    throw new Error('No se pudo confirmar la respuesta del servidor. Comprueba el acceso con la nueva clave antes de reintentar.');
+                }
+                success = true;
+                resultMessage = 'La clave nueva se aplicó correctamente. El usuario ya puede iniciar sesión con ella.';
             } catch (error) {
                 console.error('No se pudo cambiar la clave:', error);
-                showToast(error.message || 'No se pudo cambiar la clave.');
+                resultMessage = passwordChangeErrorMessage(error);
             } finally {
-                if (button) button.disabled = false;
+                passwordChangeInProgress = false;
+                button.disabled = false;
+                button.textContent = 'Cambiar clave';
             }
+            if (success) cancelPasswordEdit();
+            showPasswordResult(success ? 'Clave actualizada' : 'No se pudo confirmar el cambio de clave', resultMessage);
         }
 
         async function createUser(event) {

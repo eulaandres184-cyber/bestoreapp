@@ -258,13 +258,31 @@ exports.setUserPassword = guarded(async request => {
         assert(target.exists, 'El usuario no existe.', 'not-found');
         tx.create(auditRef, { uid, changedBy: request.auth.uid, status: 'pending', createdAt: FieldValue.serverTimestamp() });
     });
+    const auth = getAuth();
     try {
-        await getAuth().updateUser(uid, { password });
-        await getAuth().revokeRefreshTokens(uid);
+        await auth.updateUser(uid, { password });
+    } catch (error) {
+        console.error(`Falló la actualización de clave de la operación ${auditRef.id}:`, error.code || 'error-interno');
+        const messages = {
+            'auth/user-not-found': 'No existe la cuenta de autenticación del usuario seleccionado.',
+            'auth/invalid-password': 'Firebase rechazó la clave. Verifica los requisitos de contraseña del proyecto.',
+            'auth/password-does-not-meet-requirements': 'La clave no cumple los requisitos de contraseña configurados en Firebase.'
+        };
+        const knownMessage = messages[error.code];
+        throw new DomainError(knownMessage ? 'failed-precondition' : 'internal', knownMessage ||
+            `No se pudo confirmar si Firebase cambió la clave. Comprueba el acceso con la nueva clave antes de reintentar. Operación: ${auditRef.id}.`);
+    }
+    try {
+        await auth.revokeRefreshTokens(uid);
+    } catch (error) {
+        console.error(`La clave se cambió, pero falló la revocación en la operación ${auditRef.id}:`, error.code || 'error-interno');
+        throw new DomainError('internal', `La clave nueva ya fue aplicada, pero no se pudo confirmar el cierre de las sesiones anteriores. No repitas el cambio; consulta la operación ${auditRef.id}.`);
+    }
+    try {
         await auditRef.update({ status: 'applied', appliedAt: FieldValue.serverTimestamp() });
     } catch (error) {
-        console.error(`No se pudo completar el cambio de clave; revisar la operación ${auditRef.id}.`, error.code || 'error-interno');
-        throw new DomainError('internal', `No se pudo confirmar el cambio de clave. Revisa la operación ${auditRef.id} antes de reintentar.`);
+        console.error(`La clave se cambió, pero falló la auditoría en la operación ${auditRef.id}:`, error.code || 'error-interno');
+        throw new DomainError('internal', `La clave nueva ya fue aplicada y las sesiones fueron revocadas, pero no se pudo finalizar la auditoría. No repitas el cambio; consulta la operación ${auditRef.id}.`);
     }
     return { uid, operationId: auditRef.id };
 });
