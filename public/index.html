@@ -182,18 +182,6 @@
                     <span id="clockDate" class="text-[10px] text-slate-500">12 Feb 2026</span>
                 </div>
 
-                <!-- Fast POS Shortcut Button -->
-                <button onclick="switchTab('pos')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 sm:px-3.5 rounded-xl flex items-center gap-2 shadow-sm transition" title="Nueva venta">
-                    <i class="fa-solid fa-plus-circle"></i>
-                    <span class="hidden sm:inline">Nueva Venta</span>
-                </button>
-
-                <!-- Quick Product Modal Button -->
-                <button id="quickProductButton" onclick="openProductModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-3 py-2 sm:px-3.5 rounded-xl flex items-center gap-2 shadow-sm transition" title="Cargar producto">
-                    <i class="fa-solid fa-box-archive"></i>
-                    <span class="hidden sm:inline">Cargar Producto</span>
-                </button>
-
                 <button onclick="logoutUser()" class="xl:hidden bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold px-3 py-2 rounded-xl flex items-center justify-center shadow-sm transition" title="Cerrar sesión" aria-label="Cerrar sesión">
                     <i class="fa-solid fa-right-from-bracket"></i>
                     <span class="hidden sm:inline">Salir</span>
@@ -231,24 +219,23 @@
                     <div class="custom-card p-4 flex items-center justify-between">
                         <div>
                             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Celulares en Stock</p>
-                            <h3 id="dashPhonesCount" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 unidades</h3>
-                            <p id="dashPhonesSub" class="text-[11px] text-purple-600 font-medium mt-1">0 Nuevos / 0 Usados</p>
+                            <div id="dashPhoneAvailableNames" class="mt-2 space-y-1 text-xs font-bold text-slate-900" aria-live="polite">
+                                No hay celulares disponibles.
+                            </div>
                         </div>
                         <div class="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg">
                             <i class="fa-solid fa-mobile-screen"></i>
                         </div>
                     </div>
 
-                    <div class="custom-card p-4 flex items-center justify-between">
+                    <button id="dashboardQuickProductButton" type="button" onclick="openProductModal()" class="custom-card p-4 flex items-center justify-between text-left hover:border-brand-300 transition">
                         <div>
-                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Valor Celulares</p>
-                            <h3 id="dashPhoneValue" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">$0</h3>
-                            <p class="text-[11px] text-purple-600 font-medium mt-1">Precio Lista Venta</p>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Inventario</p>
+                            <span class="block text-lg font-extrabold text-slate-900 mt-1">Cargar Producto</span>
+                            <span class="block text-[11px] text-brand-600 mt-1">Agregar accesorio al catálogo</span>
                         </div>
-                        <div class="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg">
-                            <i class="fa-solid fa-mobile-screen-button"></i>
-                        </div>
-                    </div>
+                        <span class="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center text-lg"><i class="fa-solid fa-box-archive"></i></span>
+                    </button>
 
                     <div class="custom-card p-4 flex items-center justify-between">
                         <div>
@@ -262,21 +249,28 @@
                         </div>
                     </div>
 
-                    <div class="custom-card p-4 flex items-center justify-between">
+                    <button id="dashboardNewPhoneButton" type="button" onclick="openPhoneModal()" class="custom-card p-4 flex items-center justify-between text-left hover:border-purple-300 transition">
                         <div>
-                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Alertas de Stock Bajo</p>
-                            <h3 id="dashLowStockCount" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 ítems</h3>
-                            <p class="text-[11px] text-amber-600 font-medium mt-1">Reponer pronto</p>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Celulares</p>
+                            <span class="block text-lg font-extrabold text-slate-900 mt-1">Ingresar nuevo celular</span>
+                            <span class="block text-[11px] text-purple-600 mt-1">Cargar equipo al inventario</span>
                         </div>
-                        <div class="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
-                            <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span class="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg"><i class="fa-solid fa-mobile-screen-button"></i></span>
+                    </button>
+
+                    <button type="button" onclick="switchTab('canje-calculator')" class="custom-card p-4 flex items-center justify-between text-left hover:border-amber-300 transition">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan Canje</p>
+                            <span class="block text-lg font-extrabold text-slate-900 mt-1">Cotizar Canje</span>
+                            <span class="block text-[11px] text-amber-600 mt-1">Consultar tabla actualizada de iPhone</span>
                         </div>
-                    </div>
+                        <span class="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg"><i class="fa-solid fa-arrows-rotate"></i></span>
+                    </button>
 
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div class="order-3 lg:col-span-5 custom-card p-4">
+                <div class="order-2 lg:col-span-5 custom-card p-4">
                     <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-cash-register text-emerald-600"></i> Cajas seguras</h3>
                     <details class="mt-2">
                     <summary class="text-xs font-semibold text-emerald-700 cursor-pointer">Abrir, cerrar y consultar cajas</summary>
@@ -333,7 +327,7 @@
                     </div>
 
                     <!-- Quick Stock Alert Panel -->
-                    <div class="order-2 lg:col-span-5 custom-card p-5 flex flex-col justify-between">
+                    <div class="order-3 lg:col-span-5 custom-card p-5 flex flex-col justify-between">
                         <div>
                             <div class="flex items-center justify-between mb-3 border-b border-bonewhite-border pb-2">
                                 <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
@@ -352,42 +346,6 @@
                     </div>
                 </div>
 
-                <!-- Quick Actions Shortcuts -->
-                <div class="custom-card p-5 bg-bonewhite-50">
-                    <h3 class="font-bold text-slate-900 text-sm mb-3">Acciones Rápidas del Sistema</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <button onclick="switchTab('pos')" class="p-3 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl flex items-center gap-3 transition group text-left">
-                            <div class="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-base group-hover:bg-emerald-600 group-hover:text-white transition">
-                                <i class="fa-solid fa-cash-register"></i>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-slate-900 block">Cobrar en Caja</span>
-                                <span class="text-[10px] text-slate-500">Iniciar punto de venta</span>
-                            </div>
-                        </button>
-
-                        <button onclick="openPhoneModal()" class="p-3 bg-white border border-slate-200 hover:border-purple-500 rounded-xl flex items-center gap-3 transition group text-left">
-                            <div class="w-9 h-9 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center text-base group-hover:bg-purple-600 group-hover:text-white transition">
-                                <i class="fa-solid fa-mobile-screen"></i>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-slate-900 block">+ Ingresar Celular</span>
-                                <span class="text-[10px] text-slate-500">Nuevo o Usado con IMEI</span>
-                            </div>
-                        </button>
-
-                        <button onclick="switchTab('canje-calculator')" class="p-3 bg-white border border-slate-200 hover:border-amber-500 rounded-xl flex items-center gap-3 transition group text-left">
-                            <div class="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-base group-hover:bg-amber-600 group-hover:text-white transition">
-                                <i class="fa-solid fa-arrows-rotate"></i>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-slate-900 block">Cotizar Canje</span>
-                                <span class="text-[10px] text-slate-500">Evaluar equipo usado</span>
-                            </div>
-                        </button>
-
-                    </div>
-                </div>
             </section>
 
             <!-- SECTION 2: POINT OF SALE (POS / CAJA) -->

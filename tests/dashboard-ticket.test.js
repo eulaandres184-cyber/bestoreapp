@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const tradeInRates = require('../public/js/iphone-trade-in-rates.json');
 
 function createApp() {
     const elements = new Map();
@@ -26,19 +27,76 @@ function createApp() {
 
 test('las tarjetas muestran hoy primero y acumulado en lugar del valor de accesorios', () => {
     const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-    assert.ok(html.indexOf('id="dashSalesToday"') < html.indexOf('id="dashPhonesCount"'));
-    assert.ok(html.indexOf('id="dashSalesTotal"') > html.indexOf('id="dashPhoneValue"'));
+    assert.ok(html.indexOf('id="dashSalesToday"') < html.indexOf('id="dashPhoneAvailableNames"'));
+    assert.ok(html.indexOf('id="dashSalesTotal"') > html.indexOf('id="dashPhoneAvailableNames"'));
+    assert.match(html, /id="dashboardQuickProductButton"[^>]*onclick="openProductModal\(\)"/);
+    assert.match(html, /id="dashboardNewPhoneButton"[^>]*>[\s\S]*?Ingresar nuevo celular/);
+    assert.match(html, /onclick="switchTab\('canje-calculator'\)" class="custom-card[^"]*"[^>]*>[\s\S]*?Cotizar Canje/);
+    assert.doesNotMatch(html, /Acciones Rápidas del Sistema/);
+    assert.doesNotMatch(html, /id="dashPhoneValue"|id="dashPhonesCount"|id="dashPhonesSub"|id="dashLowStockCount"/);
     assert.doesNotMatch(html, /id="dashTotalValue"/);
     assert.equal((html.match(/id="dashSalesToday"/g) || []).length, 1);
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    assert.doesNotMatch(header, /Nueva Venta|Cargar Producto/);
 });
 
 test('el dashboard presenta acceso destacado a venta y cajas plegadas', () => {
     const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
     assert.match(html, /class="dashboard-new-sale custom-card[^"]*"[^>]*>/);
     assert.match(html, /<details class="mt-2">[\s\S]*?id="openAllRegistersButton"[\s\S]*?id="cashRegisterSummary"[\s\S]*?<\/details>/);
-    assert.match(html, /order-3 lg:col-span-5 custom-card/);
-    assert.match(html, /order-2 lg:col-span-5 custom-card/);
+    assert.match(html, /order-2 lg:col-span-5 custom-card p-4/);
+    assert.match(html, /order-3 lg:col-span-5 custom-card p-5[\s\S]*?Productos con Stock Crítico/);
     assert.match(html, /order-1 lg:col-span-7 lg:row-span-2 custom-card/);
+    assert.match(html, /id="view-dashboard"[\s\S]*?Cotizar Canje[\s\S]*?Consultar tabla actualizada de iPhone/);
+});
+
+test('el resumen de celulares muestra los dos equipos disponibles de mayor valor', () => {
+    const { context, elements } = createApp();
+    context.renderCashRegister = () => {};
+    context.renderDashboardRecentSales = () => {};
+    vm.runInContext(`PHONES = [
+        { brand: 'Apple', model: 'iPhone 14 Pro', storage: '128 GB', status: 'En Stock', price: 600 },
+        { brand: 'Samsung', model: 'A27', storage: '256 GB', status: 'En Stock', price: 400 },
+        { brand: 'Apple', model: 'iPhone 12', storage: '64 GB', status: 'En Stock', price: 200 },
+        { brand: 'Apple', model: 'Vendido', storage: '128 GB', status: 'Vendido', price: 900 }
+    ]; PRODUCTS = []`, context);
+
+    context.renderDashboard();
+
+    assert.equal(elements.get('dashPhoneAvailableNames').textContent, 'iPhone 14 Pro 128 GB\nSamsung A27 256 GB');
+});
+
+test('la cotización de canje coincide con la lista actualizada', () => {
+    const rates = new Map(tradeInRates.rates.map(rate => [
+        `${rate.model}|${rate.storageGb}`, [rate.over90Usd, rate.under90Usd]
+    ]));
+    const expected = [
+        ['iPhone 11',64,100,80], ['iPhone 11',128,130,100],
+        ['iPhone 11 Pro',64,150,120], ['iPhone 11 Pro',256,170,140],
+        ['iPhone 11 Pro Max',64,180,150], ['iPhone 11 Pro Max',256,200,170],
+        ['iPhone 12',64,150,120], ['iPhone 12',128,180,150],
+        ['iPhone 12 Pro',128,220,190], ['iPhone 12 Pro',256,240,210],
+        ['iPhone 12 Pro Max',128,240,210], ['iPhone 12 Pro Max',256,260,230],
+        ['iPhone 13',128,250,220], ['iPhone 13',256,280,240],
+        ['iPhone 13 Pro',128,320,290], ['iPhone 13 Pro',256,360,320],
+        ['iPhone 13 Pro Max',128,360,320], ['iPhone 13 Pro Max',256,380,340],
+        ['iPhone 14',128,300,270], ['iPhone 14',256,320,290],
+        ['iPhone 14 Pro',128,370,330], ['iPhone 14 Pro',256,400,370],
+        ['iPhone 14 Pro Max',128,450,420], ['iPhone 14 Pro Max',256,480,450],
+        ['iPhone 15',128,420,390], ['iPhone 15',256,440,410],
+        ['iPhone 15 Pro',128,500,470], ['iPhone 15 Pro',256,530,500],
+        ['iPhone 15 Pro Max',256,580,530],
+        ['iPhone 16',128,550,520], ['iPhone 16',256,580,550],
+        ['iPhone 16 Pro',128,650,600], ['iPhone 16 Pro',256,680,620],
+        ['iPhone 16 Pro Max',256,750,700], ['iPhone 17',256,750,700],
+        ['iPhone 17 Pro',256,900,850], ['iPhone 17 Pro',512,950,900],
+        ['iPhone 17 Pro Max',256,1050,1000], ['iPhone 17 Pro Max',512,1150,1100]
+    ];
+    assert.equal(tradeInRates.batteryThresholdPercent, 90);
+    assert.equal(rates.size, expected.length);
+    for (const [model, storage, over90, under90] of expected) {
+        assert.deepEqual(rates.get(`${model}|${storage}`), [over90, under90], `${model} ${storage} GB`);
+    }
 });
 
 test('el dashboard presenta el resumen seguro del día y acumulado neto', async () => {

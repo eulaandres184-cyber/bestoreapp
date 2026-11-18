@@ -331,6 +331,8 @@ let IPHONE_TRADE_IN_RATES = [];
         function applyRoleAccess() {
             const adminOnlyElements = [
                 document.getElementById('quickProductButton'),
+                document.getElementById('dashboardQuickProductButton'),
+                document.getElementById('dashboardNewPhoneButton'),
                 document.getElementById('newProductButton'),
                 document.getElementById('newPhoneButton'),
                 document.getElementById('newCategoryButton'),
@@ -569,19 +571,23 @@ let IPHONE_TRADE_IN_RATES = [];
 
         /* DASHBOARD RENDERING */
         function renderDashboard() {
-            // Calculations
-            let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + p.price, 0);
-
             let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
-            let newPhones = inStockPhones.filter(p => p.condition === 'Nuevo').length;
-            let usedPhones = inStockPhones.filter(p => p.condition.includes('Usado')).length;
-
+            const featuredPhones = inStockPhones
+                .map((phone, index) => ({ phone, index }))
+                .sort((first, second) => (Number(second.phone.price) || 0) - (Number(first.phone.price) || 0) || first.index - second.index)
+                .slice(0, 2)
+                .map(({ phone }) => {
+                    const model = String(phone.model || '').trim();
+                    const name = phone.brand === 'Apple' && /^iPhone\b/i.test(model)
+                        ? model : `${phone.brand || ''} ${model}`.trim();
+                    return `${name}${phone.storage ? ` ${phone.storage}` : ''}`.trim();
+                });
             let lowStockAcc = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.minStock);
 
-            document.getElementById('dashPhoneValue').textContent = `$${phoneValue.toLocaleString('es-AR')}`;
-            document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
-            document.getElementById('dashPhonesSub').textContent = `${newPhones} Nuevos / ${usedPhones} Usados`;
-            document.getElementById('dashLowStockCount').textContent = `${lowStockAcc.length} ítems`;
+            document.getElementById('dashPhoneAvailableNames').textContent = featuredPhones.length
+                ? featuredPhones.join('\n')
+                : 'No hay celulares disponibles.';
+            document.getElementById('dashPhoneAvailableNames').classList.toggle('whitespace-pre-line', featuredPhones.length > 1);
 
             renderCashRegister();
 
