@@ -92,6 +92,7 @@ async function main() {
     assert.equal(preview.sales.length, 1);
     assert.equal(preview.saleIssues, 1);
     assert.equal((await db.doc('app_state/main').get()).data().sales.length, 1);
+    await db.doc('app_state/main').update({ sales: [] });
 
     await callable('saveInventoryItem', { id: 'ACC-1', name: 'Cable', type: 'acc', active: true, stock: 1, priceCents: 100000 });
     assert.equal((await callable('listInventory', {}))[0].id, 'ACC-1');
@@ -105,6 +106,11 @@ async function main() {
     };
     const sale = await callable('recordSale', request);
     assert.equal((await callable('recordSale', request)).ticketId, sale.ticketId);
+    const summaryBeforeReturn = await callable('getSalesSummary', {});
+    assert.equal(summaryBeforeReturn.todayCount, 1);
+    assert.equal(summaryBeforeReturn.todayCents, 100000);
+    assert.equal(summaryBeforeReturn.totalCount, 1);
+    assert.equal(summaryBeforeReturn.netCents, 100000);
     assert.equal((await db.doc('secure_inventory/ACC-1').get()).data().stock, 0);
     await callable('recordReturn', {
         operationId: '01234567-1234-4234-8234-012345678902',
@@ -115,6 +121,10 @@ async function main() {
     });
     assert.equal((await db.doc('secure_inventory/ACC-1').get()).data().stock, 1);
     assert.equal((await db.doc('secure_registers/cash').get()).data().balanceCents, 0);
+    const summaryAfterReturn = await callable('getSalesSummary', {});
+    assert.equal(summaryAfterReturn.todayCents, 100000);
+    assert.equal(summaryAfterReturn.totalCount, 1);
+    assert.equal(summaryAfterReturn.netCents, 0);
 
     await db.doc('app_state/main').update({
         dailyDollarRate: 1590,

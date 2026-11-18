@@ -19,6 +19,16 @@ body {
     transition: all 0.2s ease-in-out;
 }
 
+.dashboard-new-sale {
+    background-color: #059669;
+    color: #fff;
+    border-color: #047857;
+}
+
+.dashboard-new-sale:hover {
+    background-color: #047857;
+}
+
 .custom-card-hover:hover {
     border-color: #ff6400;
     box-shadow: 0 4px 12px -2px rgba(0, 50, 35, 0.16);

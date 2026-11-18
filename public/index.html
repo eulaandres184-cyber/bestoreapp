@@ -207,16 +207,24 @@
             <!-- SECTION 1: DASHBOARD OVERVIEW -->
             <section id="view-dashboard" class="space-y-6">
                 <!-- Top Key Metrics Cards -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                    <button type="button" onclick="switchTab('pos')" class="dashboard-new-sale custom-card p-4 flex items-center justify-between text-left text-white transition">
+                        <div>
+                            <span class="text-xs font-semibold uppercase tracking-wider">Caja</span>
+                            <span class="block text-lg font-extrabold mt-1">Nueva Venta</span>
+                            <span class="block text-[11px] mt-1">Iniciar una venta</span>
+                        </div>
+                        <span class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-lg"><i class="fa-solid fa-plus-circle"></i></span>
+                    </button>
                     
                     <div class="custom-card p-4 flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Valor Accesorios y Cargas</p>
-                            <h3 id="dashTotalValue" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">$0</h3>
-                            <p class="text-[11px] text-emerald-600 font-medium mt-1"><i class="fa-solid fa-arrow-up text-[9px]"></i> Precio Lista Venta</p>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ventas Realizadas Hoy</p>
+                            <h3 id="dashSalesToday" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">—</h3>
+                            <p id="dashRevenueToday" class="text-[11px] text-emerald-600 font-medium mt-1">Consultando ventas…</p>
                         </div>
-                        <div class="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center text-lg">
-                            <i class="fa-solid fa-vault"></i>
+                        <div class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-circle-dollar-to-slot"></i>
                         </div>
                     </div>
 
@@ -244,12 +252,13 @@
 
                     <div class="custom-card p-4 flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ventas Realizadas Hoy</p>
-                            <h3 id="dashSalesToday" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">0 oper.</h3>
-                            <p id="dashRevenueToday" class="text-[11px] text-emerald-600 font-medium mt-1">$0 facturado</p>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ventas Acumuladas</p>
+                            <h3 id="dashSalesTotal" class="text-xl font-extrabold font-mono-num text-slate-900 mt-1">—</h3>
+                            <p id="dashRevenueTotal" class="text-[11px] text-emerald-600 font-medium mt-1">Consultando ventas…</p>
+                            <button type="button" onclick="refreshSalesSummary()" class="text-[11px] text-emerald-700 underline mt-1">Actualizar</button>
                         </div>
                         <div class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
-                            <i class="fa-solid fa-circle-dollar-to-slot"></i>
+                            <i class="fa-solid fa-chart-line"></i>
                         </div>
                     </div>
 
@@ -266,15 +275,18 @@
 
                 </div>
 
-                <div class="custom-card p-5">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div class="order-3 lg:col-span-5 custom-card p-4">
                     <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2"><i class="fa-solid fa-cash-register text-emerald-600"></i> Cajas seguras</h3>
+                    <details class="mt-2">
+                    <summary class="text-xs font-semibold text-emerald-700 cursor-pointer">Abrir, cerrar y consultar cajas</summary>
                     <p class="text-[11px] text-slate-500 mt-1">Las tres cajas se abren y cierran juntas. Ingresa por separado el saldo inicial o el importe contado de cada medio.</p>
                     <div class="flex flex-wrap gap-2 mt-4">
                         <button id="openAllRegistersButton" onclick="openAllSecureRegisters()" class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-4 py-2.5 rounded-xl text-xs" disabled>Abrir las 3 cajas</button>
                         <button id="closeAllRegistersButton" onclick="closeAllSecureRegisters()" class="bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-4 py-2.5 rounded-xl text-xs" disabled>Cerrar las 3 cajas</button>
                     </div>
                     <p id="allRegistersActionStatus" class="text-[11px] text-slate-500 mt-2" aria-live="polite">Consultando estado de las cajas…</p>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                    <div class="grid grid-cols-1 gap-3 mt-4">
                         <div class="rounded-xl border border-slate-200 p-3 space-y-2">
                             <p class="font-bold text-xs">Efectivo</p>
                             <p id="cashRegisterStatus" class="text-[11px] text-slate-500">Estado sin consultar</p>
@@ -300,13 +312,13 @@
                             <input id="countedCardInput" type="number" min="0" step="0.01" placeholder="Ingresar conteo" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs">
                         </div>
                     </div>
-                    <div id="cashRegisterSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs"></div>
+                    <div id="cashRegisterSummary" class="grid grid-cols-1 gap-2 mt-4 text-xs"></div>
+                    </details>
                 </div>
 
                 <!-- Main Charts & Recent Activity Grid -->
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <!-- Recent Sales -->
-                    <div class="lg:col-span-7 custom-card p-5">
+                    <div class="order-1 lg:col-span-7 lg:row-span-2 custom-card p-5">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
                                 <i class="fa-solid fa-receipt text-brand-600"></i> Historial de Ventas Recientes
@@ -321,7 +333,7 @@
                     </div>
 
                     <!-- Quick Stock Alert Panel -->
-                    <div class="lg:col-span-5 custom-card p-5 flex flex-col justify-between">
+                    <div class="order-2 lg:col-span-5 custom-card p-5 flex flex-col justify-between">
                         <div>
                             <div class="flex items-center justify-between mb-3 border-b border-bonewhite-border pb-2">
                                 <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
@@ -1076,6 +1088,24 @@
         </div>
     </div>
 
+    <div id="editSaleModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60">
+        <div class="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div class="flex justify-between items-center"><h3 class="font-extrabold">Corregir venta</h3><button type="button" onclick="closeEditSale()" title="Cerrar">✕</button></div>
+            <p class="text-xs text-slate-600">Los precios modificados solo aplican a esta venta. Los pagos deben cubrir el subtotal antes del recargo de tarjeta.</p>
+            <div id="editSaleLines" class="space-y-2"></div>
+            <button type="button" onclick="addEditSaleLine()" class="text-sm font-bold text-emerald-700">+ Agregar producto</button>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <label>Efectivo ($)<input id="editSaleCash" type="number" min="0" step="0.01" class="w-full border rounded-lg p-2"></label>
+                <label>Transferencia ($)<input id="editSaleTransfer" type="number" min="0" step="0.01" class="w-full border rounded-lg p-2"></label>
+                <label>Base tarjeta ($)<input id="editSaleCard" type="number" min="0" step="0.01" class="w-full border rounded-lg p-2"></label>
+            </div>
+            <label class="block text-xs">Plan de tarjeta<select id="editSalePlan" class="w-full border rounded-lg p-2"></select></label>
+            <label class="block text-xs">Motivo de la corrección<textarea id="editSaleReason" maxlength="500" required class="w-full border rounded-lg p-2"></textarea></label>
+            <p id="editSaleMessage" class="text-xs text-red-700" role="alert"></p>
+            <div class="flex justify-end gap-2"><button type="button" onclick="closeEditSale()" class="px-4 py-2 bg-slate-100 rounded-xl">Cerrar</button><button id="editSaleSubmit" type="button" onclick="submitEditSale()" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl">Guardar corrección</button></div>
+        </div>
+    </div>
+
     <!-- MODAL 3: PRINTABLE TICKET / SALE RECEIPT -->
     <div id="receiptModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
         <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
@@ -1128,6 +1158,24 @@
         </div>
     </div>
 
+    <div id="deleteProductConfirmModal" class="fixed inset-0 z-[60] hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+        role="alertdialog" aria-modal="true" aria-labelledby="deleteProductConfirmTitle" aria-describedby="deleteProductConfirmMessage">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-bonewhite-border">
+            <div class="flex items-center gap-3 border-b border-bonewhite-border pb-3">
+                <span class="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                    <i class="fa-solid fa-trash"></i>
+                </span>
+                <h3 id="deleteProductConfirmTitle" class="font-extrabold text-slate-900 text-base">Eliminar producto</h3>
+            </div>
+            <p id="deleteProductConfirmMessage" class="text-sm text-slate-700">Este producto sera eliminado totalmente de la base de datos</p>
+            <p id="deleteProductConfirmName" class="text-sm font-bold text-slate-900"></p>
+            <div class="flex justify-end gap-2">
+                <button id="deleteProductConfirmAccept" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-5 rounded-xl transition">Aceptar</button>
+                <button id="deleteProductConfirmCancel" type="button" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 px-5 rounded-xl transition">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <div id="categoryModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
         <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div class="flex items-center justify-between border-b border-slate-200 pb-3">
@@ -1156,6 +1204,12 @@
                 <input id="editingUserId" type="hidden">
                 <select id="editingUserRole" class="w-full bg-white border border-brand-200 rounded-xl p-2.5 text-xs"><option value="seller">Vendedor</option><option value="admin">Admin</option></select>
                 <button class="w-full bg-brand-600 text-white font-bold py-2.5 rounded-xl text-xs">Guardar cambios</button>
+            </form>
+            <form id="changePasswordForm" onsubmit="changeUserPassword(event)" class="hidden space-y-3 rounded-xl border border-brand-200 bg-brand-50 p-3">
+                <p class="text-xs font-bold text-brand-800">Cambiar clave de <span id="passwordUserNick"></span></p>
+                <input id="passwordUserId" type="hidden">
+                <input id="passwordNewValue" required minlength="6" maxlength="128" type="password" autocomplete="new-password" placeholder="Nueva clave" class="w-full bg-white border border-brand-200 rounded-xl p-2.5 text-xs">
+                <div class="flex gap-2"><button class="flex-1 bg-brand-600 text-white font-bold py-2.5 rounded-xl text-xs">Cambiar clave</button><button type="button" onclick="cancelPasswordEdit()" class="text-xs font-semibold text-slate-500">Cancelar</button></div>
             </form>
             <div id="userList" class="space-y-2 max-h-52 overflow-y-auto"></div>
         </div>

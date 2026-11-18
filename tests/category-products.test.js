@@ -96,3 +96,26 @@ test('guardar desde la ficha actualiza la lista y cuenta de la categoría abiert
     assert.equal(elements.get('categoryProductsTitle').textContent, 'Audio (2)');
     assert.equal(elements.get('categoryProductsList').children.length, 2);
 });
+
+test('eliminar producto lo quita del inventario local sin alterar ventas guardadas', async () => {
+    const { context } = createApp('admin');
+    let deletion;
+    const storage = new Map();
+    context.requireAdmin = () => true;
+    context.confirmProductDeletion = async () => true;
+    context.callSecureFunction = async (name, data) => { deletion = { name, data }; };
+    context.localStorage = { setItem: (key, value) => storage.set(key, value) };
+    context.showToast = () => {};
+    for (const name of ['renderDashboard', 'renderAccTable', 'renderPOSCategories',
+        'renderPOSItemsGrid', 'renderCategoriesPage']) context[name] = () => {};
+    vm.runInContext(`SALES = [{ id: 'sale-1', items: [{ id: 'ACC-1', title: 'Soporte', price: 6500 }] }]`, context);
+
+    await context.deleteProduct('ACC-1');
+
+    assert.equal(deletion.name, 'deleteInventoryItem');
+    assert.equal(deletion.data.id, 'ACC-1');
+    assert.equal(vm.runInContext(`PRODUCTS.some(item => item.id === 'ACC-1')`, context), false);
+    assert.equal(vm.runInContext(`SALES[0].items[0].title`, context), 'Soporte');
+    assert.equal(vm.runInContext(`SALES[0].items[0].price`, context), 6500);
+    assert.equal(JSON.parse(storage.get('bestore_internal_products')).some(item => item.id === 'ACC-1'), false);
+});

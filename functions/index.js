@@ -7,11 +7,13 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { createHash, randomUUID } = require('node:crypto');
 const { DomainError, assert, money, normalizeItems, calculateSale } = require('./domain');
 const { previewMigration } = require('./migration');
+const { summarizeSales } = require('./sales-summary');
 
 initializeApp();
 const db = getFirestore();
 const options = { region: 'us-central1', maxInstances: 10 };
 const registers = ['cash', 'transfer', 'card'];
+const superadminUid = '67V2bdleU2bZaazTtoZUvafJTsL2';
 
 function guarded(handler) {
     return onCall(options, async request => {
@@ -176,11 +178,28 @@ exports.listInventory = guarded(async request => {
     });
 });
 
+exports.getSalesSummary = guarded(async request => {
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const stateRef = db.doc('app_state/main');
+    const salesRef = db.collection('secure_sales');
+    return db.runTransaction(async tx => {
+        const [profile, state, sales] = await Promise.all([
+            tx.get(profileRef), tx.get(stateRef), tx.get(salesRef)
+        ]);
+        authorize(request, profile);
+        assert(state.exists && Array.isArray(state.data().sales),
+            'No se encontró el historial de ventas anterior.', 'failed-precondition');
+        return summarizeSales(sales.docs.map(doc => ({ ...doc.data(), id: doc.id })), state.data().sales);
+    });
+});
+
 exports.setUserRole = guarded(async request => {
     const { uid, role } = request.data || {};
     assert(typeof uid === 'string' && uid.length > 0 && uid.length <= 128, 'Usuario inválido.');
     assert(role === 'admin' || role === 'seller', 'Rol inválido.');
     assert(uid !== request.auth.uid || role === 'admin', 'No puedes quitarte el rol de administrador.', 'permission-denied');
+    assert(uid !== superadminUid || (request.auth.uid === superadminUid && role === 'admin'),
+        'No se pueden modificar los permisos del superadministrador.', 'permission-denied');
 
     const profileRef = db.doc(`users/${request.auth.uid}`);
     const targetRef = db.doc(`users/${uid}`);
@@ -223,6 +242,33 @@ exports.setUserRole = guarded(async request => {
     return { uid, role, operationId: operationRef.id };
 });
 
+exports.setUserPassword = guarded(async request => {
+    const { uid, password } = request.data || {};
+    assert(request.auth.uid === superadminUid, 'Solo BeStore puede modificar claves.', 'permission-denied');
+    assert(typeof uid === 'string' && uid.length > 0 && uid.length <= 128 && uid !== superadminUid,
+        'Selecciona otro usuario válido.');
+    assert(typeof password === 'string' && password.length >= 6 && password.length <= 128,
+        'La clave debe tener entre 6 y 128 caracteres.');
+    const actorRef = db.doc(`users/${request.auth.uid}`);
+    const targetRef = db.doc(`users/${uid}`);
+    const auditRef = db.collection('secure_password_changes').doc();
+    await db.runTransaction(async tx => {
+        const [actor, target] = await Promise.all([tx.get(actorRef), tx.get(targetRef)]);
+        authorize(request, actor, true);
+        assert(target.exists, 'El usuario no existe.', 'not-found');
+        tx.create(auditRef, { uid, changedBy: request.auth.uid, status: 'pending', createdAt: FieldValue.serverTimestamp() });
+    });
+    try {
+        await getAuth().updateUser(uid, { password });
+        await getAuth().revokeRefreshTokens(uid);
+        await auditRef.update({ status: 'applied', appliedAt: FieldValue.serverTimestamp() });
+    } catch (error) {
+        console.error(`No se pudo completar el cambio de clave; revisar la operación ${auditRef.id}.`, error.code || 'error-interno');
+        throw new DomainError('internal', `No se pudo confirmar el cambio de clave. Revisa la operación ${auditRef.id} antes de reintentar.`);
+    }
+    return { uid, operationId: auditRef.id };
+});
+
 exports.saveInventoryItem = guarded(async request => {
     const data = request.data || {};
     const [{ id }] = normalizeItems([{ id: data.id, quantity: 1 }]);
@@ -262,6 +308,31 @@ exports.saveInventoryItem = guarded(async request => {
             createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
         });
         return updated;
+    });
+});
+
+exports.deleteInventoryItem = guarded(async request => {
+    const [{ id }] = normalizeItems([{ id: request.data?.id, quantity: 1 }]);
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const itemRef = db.doc(`secure_inventory/${id}`);
+    const stateRef = db.doc('app_state/main');
+    const auditRef = db.collection('secure_inventory_audit').doc();
+    return db.runTransaction(async tx => {
+        const [profile, item, state] = await Promise.all([
+            tx.get(profileRef), tx.get(itemRef), tx.get(stateRef)
+        ]);
+        authorize(request, profile, true);
+        assert(item.exists && item.data().type === 'acc', 'No se encontró el producto en el inventario.', 'not-found');
+        assert(state.exists && Array.isArray(state.data().products), 'El inventario del historial no es válido.', 'failed-precondition');
+        const products = state.data().products.filter(product => product.id !== id);
+        assert(products.length < state.data().products.length, 'No se encontró el producto en el inventario.', 'not-found');
+        tx.delete(itemRef);
+        tx.update(stateRef, { products, updatedAt: FieldValue.serverTimestamp() });
+        tx.create(auditRef, {
+            itemId: id, before: item.data(), after: null,
+            createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+        });
+        return { id };
     });
 });
 
@@ -455,10 +526,14 @@ exports.recordSale = guarded(async request => {
         if (operation.exists) {
             assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra operación.', 'already-exists');
             const result = operation.data().result;
-            if (result.ticketNumber !== undefined) return result;
             const existingSaleRef = db.doc(`secure_sales/${result.ticketId}`);
             const existingSale = await tx.get(existingSaleRef);
-            assert(existingSale.exists, 'No se encontró la venta confirmada para recuperar su número.', 'failed-precondition');
+            assert(existingSale.exists, 'No se encontró la venta confirmada.', 'failed-precondition');
+            assert(!existingSale.data().revision,
+                'La venta fue corregida. Vuelve a iniciar sesión para consultar el comprobante actualizado.', 'failed-precondition');
+            if (result.ticketNumber !== undefined) {
+                return result;
+            }
             const lastNumber = counter.exists ? counter.data().lastTicketNumber : 0;
             assert(Number.isSafeInteger(lastNumber) && lastNumber >= 0 && lastNumber < Number.MAX_SAFE_INTEGER,
                 'El contador de tickets no es válido.', 'failed-precondition');
@@ -517,15 +592,194 @@ exports.recordSale = guarded(async request => {
         const result = {
             ticketId: saleRef.id,
             ticketNumber,
+            sellerName: typeof profile.data().nick === 'string' && profile.data().nick.trim()
+                ? profile.data().nick.trim() : 'No registrado',
             ...sale,
             items: sale.items.map((item, index) => ({
                 ...item,
+                type: stockSnapshots[index].data().type,
                 stockAfter: stockSnapshots[index].data().stock - items[index].quantity
             }))
         };
         tx.set(ticketCounterRef, { lastTicketNumber: ticketNumber });
         tx.create(saleRef, { ...result, customerName: customerName || 'Consumidor Final', status: 'Confirmada', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
         tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
+        return result;
+    });
+});
+
+exports.getEditableSale = guarded(async request => {
+    const ticketId = requestId(request.data?.ticketId);
+    const [profile, sale] = await Promise.all([
+        db.doc(`users/${request.auth.uid}`).get(), db.doc(`secure_sales/${ticketId}`).get()
+    ]);
+    authorize(request, profile, true);
+    assert(sale.exists && sale.data().status === 'Confirmada', 'La venta no existe.', 'not-found');
+    const data = sale.data();
+    assert(!Object.values(data.returnedQuantities || {}).some(value => value > 0),
+        'No se puede editar una venta con devoluciones.', 'failed-precondition');
+    return { ticketId, revision: data.revision || 0, items: data.items, payment: data.payment };
+});
+
+exports.editSale = guarded(async request => {
+    const data = request.data || {};
+    const ticketId = requestId(data.ticketId);
+    const operationId = requestId(data.operationId);
+    assert(Number.isSafeInteger(data.revision) && data.revision >= 0, 'Revisión inválida.');
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    assert(reason.length > 0 && reason.length <= 500, 'Indica el motivo de la corrección.');
+    const items = normalizeItems(data.items).map((item, index) => ({
+        ...item, priceCents: money(data.items[index].priceCents, 'Precio')
+    }));
+    const hash = fingerprint({ ticketId, revision: data.revision, reason, items, payment: data.payment });
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const saleRef = db.doc(`secure_sales/${ticketId}`);
+    const stateRef = db.doc('app_state/main');
+    const operationRef = db.doc(`secure_sale_edits/${request.auth.uid}_${operationId}`);
+    return db.runTransaction(async tx => {
+        const [profile, saleSnapshot, stateSnapshot, operation] = await Promise.all([
+            tx.get(profileRef), tx.get(saleRef), tx.get(stateRef), tx.get(operationRef)
+        ]);
+        authorize(request, profile, true);
+        if (operation.exists) {
+            assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra corrección.', 'already-exists');
+            return operation.data().result;
+        }
+        assert(saleSnapshot.exists && saleSnapshot.data().status === 'Confirmada', 'La venta no existe.', 'not-found');
+        const sale = saleSnapshot.data();
+        assert((sale.revision || 0) === data.revision, 'La venta cambió. Vuelve a cargarla antes de guardar.', 'failed-precondition');
+        assert(!Object.values(sale.returnedQuantities || {}).some(value => value > 0),
+            'No se puede editar una venta con devoluciones.', 'failed-precondition');
+        assert(Array.isArray(sale.items) && sale.payment && stateSnapshot.exists && Array.isArray(stateSnapshot.data().sales),
+            'La venta o su historial no son válidos.', 'failed-precondition');
+        const matching = stateSnapshot.data().sales.filter(entry => entry.backendTicketId === ticketId || entry.id === ticketId);
+        assert(matching.length === 1, 'No se encontró una única venta en el historial.', 'failed-precondition');
+        const oldItems = normalizeItems(sale.items);
+        const oldSaleItems = new Map(sale.items.map(item => [item.id, item]));
+        const legacy = matching[0];
+        const allIds = [...new Set([...oldItems.map(item => item.id), ...items.map(item => item.id)])];
+        const refs = allIds.map(id => db.doc(`secure_inventory/${id}`));
+        const registerRefs = registers.map(medium => db.doc(`secure_registers/${medium}`));
+        const [inventory, cash] = await Promise.all([
+            Promise.all(refs.map(ref => tx.get(ref))),
+            Promise.all(registerRefs.map(ref => tx.get(ref)))
+        ]);
+        const oldQuantities = Object.fromEntries(oldItems.map(item => [item.id, item.quantity]));
+        const newQuantities = Object.fromEntries(items.map(item => [item.id, item.quantity]));
+        const catalog = {};
+        inventory.forEach((snapshot, index) => {
+            const id = allIds[index];
+            if (!snapshot.exists) {
+                const oldItem = oldSaleItems.get(id);
+                const requested = items.find(entry => entry.id === id);
+                if (!oldItem || !requested) {
+                    assert(oldItem, `No existe el artículo ${id}.`, 'failed-precondition');
+                    return;
+                }
+                const previousLegacyItem = legacy.items?.find(entry => entry.id === id);
+                const name = oldItem.name || previousLegacyItem?.title;
+                const type = oldItem.type || previousLegacyItem?.type;
+                assert(typeof name === 'string' && name.length > 0 && ['acc', 'phone'].includes(type),
+                    `No se puede corregir el artículo eliminado ${id} sin su detalle histórico.`, 'failed-precondition');
+                catalog[id] = {
+                    id, name, type, active: true, stock: requested.quantity,
+                    priceCents: requested.priceCents
+                };
+                return;
+            }
+            const item = snapshot.data();
+            assert(Number.isSafeInteger(item.stock) && item.stock >= 0 && ['phone', 'acc'].includes(item.type),
+                `Stock inválido para ${id}.`, 'failed-precondition');
+            const available = item.stock + (oldQuantities[id] || 0);
+            const remaining = available - (newQuantities[id] || 0);
+            assert(Number.isSafeInteger(remaining) && remaining >= 0 && remaining <= (item.type === 'phone' ? 1 : 1000000),
+                `Stock insuficiente o inválido para ${id}.`, 'failed-precondition');
+            const requested = items.find(entry => entry.id === id);
+            if (requested) {
+                assert(item.active === true || oldQuantities[id], `El artículo ${id} no está activo.`, 'failed-precondition');
+                catalog[id] = { ...item, active: true, stock: available, priceCents: requested.priceCents };
+            }
+        });
+        const corrected = calculateSale(items, catalog, data.payment);
+        const originalAmounts = [sale.payment.cashCents, sale.payment.transferCents, sale.payment.cardNetCents]
+            .map(value => money(value, 'Pago original'));
+        const newAmounts = [corrected.payment.cashCents, corrected.payment.transferCents, corrected.payment.cardNetCents];
+        const changes = newAmounts.map((value, index) => value - originalAmounts[index]);
+        const sessions = await Promise.all(cash.map((snapshot, index) => {
+            if (!changes[index]) return null;
+            assert(snapshot.exists && snapshot.data().open === true && typeof snapshot.data().sessionId === 'string',
+                `La caja ${registers[index]} debe estar abierta.`, 'failed-precondition');
+            assert(Number.isSafeInteger(snapshot.data().balanceCents + changes[index]) && snapshot.data().balanceCents + changes[index] >= 0,
+                `Saldo insuficiente en caja ${registers[index]}.`, 'failed-precondition');
+            return tx.get(db.doc(`secure_register_sessions/${snapshot.data().sessionId}`));
+        }));
+        sessions.forEach((snapshot, index) => {
+            if (changes[index]) assert(snapshot?.exists && snapshot.data().open === true &&
+                snapshot.data().balanceCents === cash[index].data().balanceCents,
+                `La sesión de caja ${registers[index]} no está disponible.`, 'failed-precondition');
+        });
+        const state = stateSnapshot.data();
+        assert(Array.isArray(state.products) && Array.isArray(state.phones),
+            'El inventario del historial no es válido.', 'failed-precondition');
+        const updatedStock = Object.fromEntries(inventory.flatMap((snapshot, index) => snapshot.exists
+            ? [[allIds[index], snapshot.data().stock + (oldQuantities[allIds[index]] || 0) - (newQuantities[allIds[index]] || 0)]] : []));
+        const activeItems = Object.fromEntries(inventory.flatMap((snapshot, index) => snapshot.exists
+            ? [[allIds[index], snapshot.data().active === true]] : []));
+        const products = state.products.map(product => Object.hasOwn(updatedStock, product.id)
+            ? { ...product, stock: updatedStock[product.id], status: activeItems[product.id] && updatedStock[product.id] > 0 ? 'Activo' : 'Anulado' }
+            : product);
+        const phones = state.phones.map(phone => Object.hasOwn(updatedStock, phone.id)
+            ? { ...phone, status: activeItems[phone.id] && updatedStock[phone.id] > 0 ? 'En Stock' : 'Vendido' }
+            : phone);
+        const legacyItems = corrected.items.map(item => ({
+            ...legacy.items?.find(entry => entry.id === item.id),
+            id: item.id, title: item.name, quantity: item.quantity, price: item.unitPriceCents / 100,
+            type: catalog[item.id].type
+        }));
+        const payment = corrected.payment;
+        const media = [payment.cashCents, payment.transferCents, payment.cardBaseCents].filter(value => value > 0).length;
+        const paymentMethod = media > 1 ? 'Pago mixto' : payment.cardBaseCents ? 'Tarjeta/Cuotas' : payment.cashCents ? 'Efectivo' : 'Transferencia';
+        const updatedLegacy = {
+            ...legacy, items: legacyItems, subtotal: corrected.subtotalCents / 100, total: corrected.totalCents / 100,
+            surcharge: (corrected.totalCents - corrected.subtotalCents) / 100, paymentMethod, paymentVersion: 2,
+            cardPlan: payment.cardPlan, cardCommission: (payment.cardTotalCents - payment.cardNetCents) / 100,
+            cardCommissionVat: 0, paymentBreakdown: {
+                cash: payment.cashCents / 100, transfer: payment.transferCents / 100, card: payment.cardTotalCents / 100
+            }
+        };
+        const updated = {
+            ...corrected,
+            items: corrected.items.map(item => ({ ...item, type: catalog[item.id].type })),
+            revision: data.revision + 1
+        };
+        const result = { ticketId, ...updated };
+        inventory.forEach((snapshot, index) => {
+            if (!snapshot.exists) return;
+            const id = allIds[index];
+            const stock = snapshot.data().stock + (oldQuantities[id] || 0) - (newQuantities[id] || 0);
+            if (stock !== snapshot.data().stock) tx.update(refs[index], { stock });
+        });
+        cash.forEach((snapshot, index) => {
+            if (!changes[index]) return;
+            const balanceCents = snapshot.data().balanceCents + changes[index];
+            tx.update(registerRefs[index], { balanceCents });
+            tx.update(db.doc(`secure_register_sessions/${snapshot.data().sessionId}`), { balanceCents });
+            tx.create(db.collection('secure_cash_movements').doc(), {
+                medium: registers[index], amountCents: changes[index], sessionId: snapshot.data().sessionId,
+                saleId: ticketId, editId: operationRef.id, createdAt: FieldValue.serverTimestamp(), createdBy: request.auth.uid
+            });
+        });
+        tx.update(saleRef, { ...updated, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid });
+        tx.update(stateRef, {
+            sales: state.sales.map(entry => entry.backendTicketId === ticketId || entry.id === ticketId ? updatedLegacy : entry),
+            products, phones,
+            salesRevision: (stateSnapshot.data().salesRevision || 0) + 1,
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        tx.create(operationRef, {
+            fingerprint: hash, result, reason, before: { items: sale.items, payment: sale.payment, totalCents: sale.totalCents },
+            after: updated, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+        });
         return result;
     });
 });

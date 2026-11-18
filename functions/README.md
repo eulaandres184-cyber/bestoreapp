@@ -11,6 +11,10 @@ controlado de los clientes anteriores.
 
 - `saveInventoryItem`: alta o ajuste de artículos por un administrador, con
   auditoría. Los celulares individuales tienen stock máximo de una unidad.
+- `deleteInventoryItem`: elimina un producto del inventario seguro y del
+  catálogo en una transacción, con auditoría. No elimina ni modifica las ventas
+  que ya contienen una copia del nombre y precio vendidos; una corrección
+  explícita de la venta se registra mediante `editSale`.
 - `openAllRegisters` y `closeAllRegisters`: un administrador abre las tres
   cajas `cash`, `transfer` y `card` en una transacción, con saldo inicial
   independiente para cada una. El cierre también es conjunto y registra el
@@ -30,7 +34,8 @@ controlado de los clientes anteriores.
   segura del celular, stock y cajas actualizados en una transacción, y ticket
   UUID. La cotización se usa una sola vez. Cada reintento debe utilizar el mismo
   `operationId` UUID y la misma solicitud; el precio de la venta confirmada
-  queda guardado en el ticket.
+  queda guardado en el ticket. También se conserva el nombre del usuario que
+  confirmó la venta; los tickets anteriores sin ese dato muestran «No registrado».
 - `previewLegacyMigration`: un administrador consulta una vista previa del
   inventario y los tickets de `app_state/main`, con incidencias para conciliar.
   Los celulares en USD que ya coinciden en nombre, estado, stock y precio con
@@ -39,9 +44,26 @@ controlado de los clientes anteriores.
   desde el backend nuevo.
 - `listInventory` y `getRegisterStatus`: la app consulta los artículos y saldos
   seguros para mostrar existencias y permitir que caja valide la disponibilidad.
+- `getSalesSummary`: calcula en una lectura consistente las operaciones y la
+  facturación bruta de hoy en horario de Argentina, y el acumulado neto de
+  ventas confirmadas menos devoluciones registradas. Incluye ventas anteriores
+  del historial sin duplicar las ventas seguras; las anuladas y pendientes no
+  se cuentan. Una venta devuelta sigue contando como operación. El neto conserva
+  los recargos de tarjeta que no se reintegran. Las devoluciones anteriores no
+  registradas en el backend seguro no pueden descontarse automáticamente.
 - `setUserRole`: un administrador con claim válida sincroniza el perfil y la
   custom claim del usuario, revoca sus tokens y registra el cambio. El primer
   administrador todavía se debe habilitar con `set-role.js`.
+- `setUserPassword`: exclusivamente la cuenta BeStore identificada por UID y
+  con rol administrativo activo puede asignar una nueva clave a otro usuario.
+  La operación se audita sin guardar la clave y revoca sus sesiones.
+- `getEditableSale` y `editSale`: un administrador consulta y corrige ventas
+  seguras confirmadas sin devoluciones. Se requiere motivo y revisión vigente;
+  la operación ajusta stock y saldos de las sesiones actuales, actualiza el
+  historial y registra antes y después en `secure_sale_edits`. Se rechaza en
+  conjunto si falta stock, saldo o alguna caja afectada está cerrada. Los
+  precios corregidos no cambian el catálogo. Un reintento conserva el mismo
+  identificador y contenido, incluso si se perdió la respuesta.
 - `recordReturn`: un administrador devuelve artículos de ventas nuevas por su
   precio base, sin recargo de cuotas. El desglose de origen es manual; el
   efectivo se reintegra en efectivo, la transferencia en transferencia y el
@@ -61,8 +83,10 @@ precios y stock recalculados en el backend. Cuenta corriente y plan canje se
 bloquean explícitamente hasta integrar sus reglas. La venta se confirma en el
 backend al imprimir o enviar el comprobante; se usa el mismo `operationId` en
 cada reintento y no se permite cancelar mientras el resultado de una llamada
-pueda ser incierto. Las anulaciones y eliminaciones locales no modifican tickets
-seguros; para ellos se debe usar el flujo de devolución.
+pueda ser incierto. Eliminar un producto del catálogo no elimina sus líneas de
+las ventas históricas ni cambia sus precios guardados. Las anulaciones y
+eliminaciones locales de ventas tampoco modifican tickets seguros; para ellos
+se debe usar el flujo de devolución.
 
 Al editar o ajustar un artículo desde la app, el cambio también se guarda en
 `secure_inventory`. Esto no es una migración masiva: los artículos existentes
@@ -81,6 +105,13 @@ cotización segura. La herramienta de migración por línea de comandos continú
 omitiendo celulares en USD; la conciliación de la vista previa de la app no
 modifica su plan de migración.
 
+Las reglas de escritura del historial requieren una versión actualizada de la
+aplicación: antes de desplegarlas deben finalizarse los tickets abiertos y
+cerrarse las versiones anteriores en todos los dispositivos. Funciones, reglas y
+Hosting deben desplegarse juntos. Después de una corrección, otros dispositivos
+con el historial anterior deben volver a iniciar sesión antes de guardar;
+de lo contrario, se rechaza la escritura para no sobrescribir la corrección.
+
 ## Autorización y puesta en marcha
 
 Cada usuario requiere una custom claim `bestoreRole` con valor `admin` o
@@ -91,8 +122,8 @@ claim. Los vendedores pueden registrar ventas, pero solo los administradores
 pueden ajustar el catálogo y abrir o cerrar cajas.
 
 Todos los usuarios activos con `admin` tanto en su custom claim como en su
-perfil tienen los mismos permisos administrativos del backend y la app; no hay
-una cuenta `BeStore` con privilegios adicionales por UID o nombre. Las cargas
+perfil tienen permisos administrativos, pero únicamente la cuenta BeStore
+identificada por UID puede cambiar claves de otros usuarios. Las cargas
 de imágenes no se usan actualmente en la app y Firebase Storage aún no está
 inicializado en el proyecto `be-store-app`.
 

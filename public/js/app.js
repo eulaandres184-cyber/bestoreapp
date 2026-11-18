@@ -144,6 +144,12 @@ let IPHONE_TRADE_IN_RATES = [];
             card: { open: false, balanceCents: 0, openingCents: 0 }
         };
         let secureRegistersLoaded = false;
+        let salesSummaryRequest = 0;
+        let salesSummaryTimer = null;
+        let loadedSalesRevision = 0;
+        let editableSale = null;
+        let editSaleInventory = [];
+        let editSaleSubmitting = false;
         let dailyDollarRate = 0;
         let openCategoryId = null;
 
@@ -270,6 +276,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('No se pudo consultar el backend seguro. Las ventas nuevas requieren que las funciones estén disponibles y el inventario migrado.');
             }
             document.getElementById('authScreen').classList.add('hidden');
+            switchTab('dashboard');
             normalizeCommercialData();
             restoreTicketDraft(user.uid, inventoryRefreshed);
             try {
@@ -282,6 +289,11 @@ let IPHONE_TRADE_IN_RATES = [];
             updatePhonePriceLabel();
             startSystemClock();
             renderDashboard();
+            refreshSalesSummary();
+            if (salesSummaryTimer) clearInterval(salesSummaryTimer);
+            salesSummaryTimer = setInterval(() => {
+                if (!document.getElementById('view-dashboard').classList.contains('hidden')) refreshSalesSummary();
+            }, 60000);
             renderAccTable();
             renderPhonesTable();
             renderSalesTable();
@@ -335,6 +347,9 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function logoutUser() {
+            salesSummaryRequest += 1;
+            if (salesSummaryTimer) clearInterval(salesSummaryTimer);
+            salesSummaryTimer = null;
             await firebase.auth().signOut();
             currentUserProfile = null;
             posState.ticket = [];
@@ -352,6 +367,7 @@ let IPHONE_TRADE_IN_RATES = [];
         function closeUserModal() {
             document.getElementById('userModal').classList.add('hidden');
             cancelUserEdit();
+            cancelPasswordEdit();
         }
 
         async function renderUserList() {
@@ -363,9 +379,50 @@ let IPHONE_TRADE_IN_RATES = [];
                 const status = user.active === false ? 'Inactivo' : 'Activo';
                 return `<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs ${user.active === false ? 'opacity-60' : ''}">
                     <div class="min-w-0"><p class="font-bold text-slate-900 truncate">${user.nick} <span class="font-medium text-slate-500">· ${user.role === 'admin' ? 'Admin' : 'Vendedor'}</span></p><p class="text-[10px] ${user.active === false ? 'text-red-600' : 'text-emerald-600'}">${status}${isCurrentUser ? ' · Tu usuario' : ''}</p></div>
-                    <div class="flex shrink-0 gap-1"><button onclick="startUserEdit('${doc.id}', '${user.nick}', '${user.role}')" class="p-1.5 text-brand-600 hover:bg-brand-50 rounded-lg" title="Editar usuario"><i class="fa-solid fa-pen"></i></button>${!isCurrentUser && user.active !== false ? `<button onclick="deactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Desactivar usuario"><i class="fa-solid fa-user-slash"></i></button>` : user.active === false ? `<button onclick="reactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Reactivar usuario"><i class="fa-solid fa-user-check"></i></button>` : ''}</div>
+                    <div class="flex shrink-0 gap-1"><button onclick="startUserEdit('${doc.id}', '${user.nick}', '${user.role}')" class="p-1.5 text-brand-600 hover:bg-brand-50 rounded-lg" title="Editar usuario"><i class="fa-solid fa-pen"></i></button>${firebase.auth().currentUser?.uid === '67V2bdleU2bZaazTtoZUvafJTsL2' && !isCurrentUser ? `<button onclick="startPasswordEdit('${doc.id}')" class="p-1.5 text-brand-600 hover:bg-brand-50 rounded-lg" title="Cambiar clave"><i class="fa-solid fa-key"></i></button>` : ''}${!isCurrentUser && user.active !== false ? `<button onclick="deactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Desactivar usuario"><i class="fa-solid fa-user-slash"></i></button>` : user.active === false ? `<button onclick="reactivateUser('${doc.id}', '${user.nick}')" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Reactivar usuario"><i class="fa-solid fa-user-check"></i></button>` : ''}</div>
                 </div>`;
             }).join('');
+        }
+
+        async function startPasswordEdit(userId) {
+            if (!requireAdmin() || firebase.auth().currentUser?.uid !== '67V2bdleU2bZaazTtoZUvafJTsL2') return;
+            try {
+                const user = await db.collection('users').doc(userId).get();
+                if (!user.exists) throw new Error('El usuario no existe.');
+                document.getElementById('passwordUserId').value = userId;
+                document.getElementById('passwordUserNick').textContent = user.data().nick;
+                document.getElementById('passwordNewValue').value = '';
+                document.getElementById('changePasswordForm').classList.remove('hidden');
+            } catch (error) {
+                console.error('No se pudo consultar el usuario:', error);
+                showToast(error.message || 'No se pudo consultar el usuario.');
+            }
+        }
+
+        function cancelPasswordEdit() {
+            document.getElementById('changePasswordForm').classList.add('hidden');
+            document.getElementById('passwordUserId').value = '';
+            document.getElementById('passwordNewValue').value = '';
+        }
+
+        async function changeUserPassword(event) {
+            event.preventDefault();
+            if (!requireAdmin() || firebase.auth().currentUser?.uid !== '67V2bdleU2bZaazTtoZUvafJTsL2') return;
+            const button = event.submitter;
+            if (button) button.disabled = true;
+            try {
+                await callSecureFunction('setUserPassword', {
+                    uid: document.getElementById('passwordUserId').value,
+                    password: document.getElementById('passwordNewValue').value
+                });
+                cancelPasswordEdit();
+                showToast('Clave actualizada. El usuario debe volver a iniciar sesión.');
+            } catch (error) {
+                console.error('No se pudo cambiar la clave:', error);
+                showToast(error.message || 'No se pudo cambiar la clave.');
+            } finally {
+                if (button) button.disabled = false;
+            }
         }
 
         async function createUser(event) {
@@ -498,6 +555,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
             if (tabId === 'dashboard') {
                 renderDashboard();
+                refreshSalesSummary();
             } else if (tabId === 'pos') {
                 renderPOSItemsGrid();
             } else if (tabId === 'categories') {
@@ -512,7 +570,6 @@ let IPHONE_TRADE_IN_RATES = [];
         /* DASHBOARD RENDERING */
         function renderDashboard() {
             // Calculations
-            let accValue = PRODUCTS.reduce((sum, p) => sum + (p.price * p.stock), 0);
             let phoneValue = PHONES.filter(p => p.status === 'En Stock').reduce((sum, p) => sum + p.price, 0);
 
             let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
@@ -521,19 +578,11 @@ let IPHONE_TRADE_IN_RATES = [];
 
             let lowStockAcc = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.minStock);
 
-            document.getElementById('dashTotalValue').textContent = `$${accValue.toLocaleString('es-AR')}`;
             document.getElementById('dashPhoneValue').textContent = `$${phoneValue.toLocaleString('es-AR')}`;
             document.getElementById('dashPhonesCount').textContent = `${inStockPhones.length} unidades`;
             document.getElementById('dashPhonesSub').textContent = `${newPhones} Nuevos / ${usedPhones} Usados`;
             document.getElementById('dashLowStockCount').textContent = `${lowStockAcc.length} ítems`;
 
-            // Today's Sales
-            const todayStr = new Date().toLocaleDateString('es-AR');
-            const salesToday = SALES.filter(s => s.date.includes(todayStr));
-            const revToday = salesToday.reduce((sum, s) => sum + s.total, 0);
-
-            document.getElementById('dashSalesToday').textContent = `${salesToday.length} oper.`;
-            document.getElementById('dashRevenueToday').textContent = `$${revToday.toLocaleString('es-AR')} facturado`;
             renderCashRegister();
 
             // Badges
@@ -565,6 +614,35 @@ let IPHONE_TRADE_IN_RATES = [];
             }
 
             renderDashboardRecentSales();
+        }
+
+        async function refreshSalesSummary() {
+            const request = ++salesSummaryRequest;
+            const countToday = document.getElementById('dashSalesToday');
+            const revenueToday = document.getElementById('dashRevenueToday');
+            const countTotal = document.getElementById('dashSalesTotal');
+            const revenueTotal = document.getElementById('dashRevenueTotal');
+            countToday.textContent = '—';
+            countTotal.textContent = '—';
+            revenueToday.textContent = 'Consultando ventas…';
+            revenueTotal.textContent = 'Consultando ventas…';
+            try {
+                const summary = await callSecureFunction('getSalesSummary');
+                if (request !== salesSummaryRequest) return;
+                if (!summary || ['todayCount', 'todayCents', 'totalCount', 'netCents']
+                    .some(key => !Number.isSafeInteger(summary[key]) || summary[key] < 0)) {
+                    throw new Error('El backend devolvió un resumen de ventas inválido.');
+                }
+                countToday.textContent = `${summary.todayCount.toLocaleString('es-AR')} oper.`;
+                revenueToday.textContent = `$${(summary.todayCents / 100).toLocaleString('es-AR')} facturado`;
+                countTotal.textContent = `${summary.totalCount.toLocaleString('es-AR')} oper.`;
+                revenueTotal.textContent = `$${(summary.netCents / 100).toLocaleString('es-AR')} neto, menos devoluciones`;
+            } catch (error) {
+                if (request !== salesSummaryRequest) return;
+                console.error('No se pudo consultar el resumen de ventas:', error);
+                revenueToday.textContent = 'No se pudieron consultar las ventas.';
+                revenueTotal.textContent = 'No se pudieron consultar las ventas. Usa Actualizar para reintentar.';
+            }
         }
 
         function getTicketNumber(sale) {
@@ -602,6 +680,17 @@ let IPHONE_TRADE_IN_RATES = [];
         function getSaleCustomerName(sale) {
             const name = typeof sale.customerName === 'string' ? sale.customerName.trim() : '';
             return !name || name === 'Cliente Mostrador' ? 'Consumidor Final' : name;
+        }
+
+        function getSaleSellerName(sale) {
+            return typeof sale.sellerName === 'string' && sale.sellerName.trim()
+                ? sale.sellerName.trim() : 'No registrado';
+        }
+
+        function escapeReceiptText(value) {
+            return String(value).replace(/[&<>"']/g, character => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[character]);
         }
 
         function renderDashboardRecentSales() {
@@ -1635,11 +1724,141 @@ let IPHONE_TRADE_IN_RATES = [];
                         <button onclick="reprintReceipt('${sale.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Ver Comprobante">
                             <i class="fa-solid fa-receipt"></i>
                         </button>
+                        ${isAdmin() && sale.status === 'Confirmada' && sale.backendTicketId ? `<button onclick="openEditSale('${sale.id}')" class="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs" title="Corregir venta"><i class="fa-solid fa-pen"></i></button>` : ''}
                         ${isAdmin() && sale.status !== 'Anulada' && !sale.backendTicketId && !sale.backendSubmissionStarted ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
                         ${isAdmin() && !sale.backendTicketId ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
+        }
+
+        function editSalePendingKey() {
+            return `bestore_sale_edit_${firebase.auth().currentUser.uid}`;
+        }
+
+        async function openEditSale(saleId) {
+            if (!requireAdmin()) return;
+            if (pendingSaleId || posState.ticket.length) {
+                showToast('Finaliza o cancela el ticket actual antes de corregir una venta.');
+                return;
+            }
+            const sale = SALES.find(entry => entry.id === saleId);
+            if (!sale?.backendTicketId) return;
+            const message = document.getElementById('editSaleMessage');
+            message.textContent = '';
+            try {
+                const pending = localStorage.getItem(editSalePendingKey());
+                if (pending) {
+                    editableSale = { pending: JSON.parse(pending) };
+                    document.getElementById('editSaleLines').innerHTML = '';
+                    message.textContent = 'Hay una corrección con resultado pendiente. Reintenta la misma operación antes de iniciar otra.';
+                    document.getElementById('editSaleSubmit').textContent = 'Reintentar corrección';
+                } else {
+                    const [details, inventory] = await Promise.all([
+                        callSecureFunction('getEditableSale', { ticketId: sale.backendTicketId }),
+                        callSecureFunction('listInventory')
+                    ]);
+                    editableSale = details;
+                    editSaleInventory = inventory.filter(item => item.active || details.items.some(line => line.id === item.id));
+                    document.getElementById('editSaleLines').innerHTML = '';
+                    details.items.forEach(item => addEditSaleLine(item));
+                    ['Cash', 'Transfer', 'Card'].forEach((name, index) => {
+                        const key = ['cashCents', 'transferCents', 'cardBaseCents'][index];
+                        document.getElementById(`editSale${name}`).value = details.payment[key] / 100;
+                    });
+                    const plan = document.getElementById('editSalePlan');
+                    plan.innerHTML = Object.entries(CARD_PLANS).map(([id, entry]) => `<option value="${id}">${escapeReceiptText(entry.label)}</option>`).join('');
+                    const planId = Object.keys(CARD_PLANS).find(id => CARD_PLANS[id].label === details.payment.cardPlan);
+                    if (details.payment.cardBaseCents && !planId) throw new Error('El plan de tarjeta de la venta no es válido.');
+                    if (planId) plan.value = planId;
+                    document.getElementById('editSaleReason').value = '';
+                    document.getElementById('editSaleSubmit').textContent = 'Guardar corrección';
+                }
+                document.getElementById('editSaleModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('No se pudo cargar la venta para corregir:', error);
+                showToast(error.message || 'No se pudo cargar la venta.');
+            }
+        }
+
+        function closeEditSale() {
+            if (!editSaleSubmitting) document.getElementById('editSaleModal').classList.add('hidden');
+        }
+
+        function addEditSaleLine(item = null) {
+            if (!editableSale || editableSale.pending) return;
+            const row = document.createElement('div');
+            row.className = 'grid grid-cols-1 sm:grid-cols-12 gap-2';
+            const options = editSaleInventory.map(entry => `<option value="${escapeReceiptText(entry.id)}">${escapeReceiptText(entry.name)} (${escapeReceiptText(entry.id)})</option>`).join('');
+            row.innerHTML = `<select class="edit-item sm:col-span-6 border rounded-lg p-2 text-xs">${options}</select>
+                <input class="edit-quantity sm:col-span-2 border rounded-lg p-2 text-xs" type="number" min="1" step="1" aria-label="Cantidad">
+                <input class="edit-price sm:col-span-3 border rounded-lg p-2 text-xs" type="number" min="0" step="0.01" aria-label="Precio unitario">
+                <button type="button" class="sm:col-span-1 text-red-700" aria-label="Quitar producto">✕</button>`;
+            const select = row.querySelector('.edit-item');
+            const price = row.querySelector('.edit-price');
+            const setCatalogPrice = () => {
+                const entry = editSaleInventory.find(product => product.id === select.value);
+                price.value = entry ? entry.priceCents / 100 : '';
+            };
+            select.addEventListener('change', setCatalogPrice);
+            row.querySelector('button').addEventListener('click', () => row.remove());
+            if (item) select.value = item.id;
+            row.querySelector('.edit-quantity').value = item?.quantity || 1;
+            if (item) price.value = item.unitPriceCents / 100;
+            else setCatalogPrice();
+            document.getElementById('editSaleLines').appendChild(row);
+        }
+
+        async function submitEditSale() {
+            if (!requireAdmin() || !editableSale || editSaleSubmitting) return;
+            const message = document.getElementById('editSaleMessage');
+            let request = editableSale.pending;
+            try {
+                if (!request) {
+                    const cents = value => {
+                        const text = String(value).trim();
+                        if (!/^\d+(?:\.\d{1,2})?$/.test(text)) throw new Error('Ingresa importes válidos con hasta dos decimales.');
+                        const [whole, fraction = ''] = text.split('.');
+                        const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+                        if (!Number.isSafeInteger(result)) throw new Error('El importe es demasiado grande.');
+                        return result;
+                    };
+                    const items = [...document.querySelectorAll('#editSaleLines > div')].map(row => ({
+                        id: row.querySelector('.edit-item').value,
+                        quantity: Number(row.querySelector('.edit-quantity').value),
+                        priceCents: cents(row.querySelector('.edit-price').value)
+                    }));
+                    const payment = {
+                        cashCents: cents(document.getElementById('editSaleCash').value),
+                        transferCents: cents(document.getElementById('editSaleTransfer').value),
+                        cardBaseCents: cents(document.getElementById('editSaleCard').value),
+                        cardPlan: document.getElementById('editSalePlan').value
+                    };
+                    request = { ticketId: editableSale.ticketId, revision: editableSale.revision, operationId: createOperationId(),
+                        reason: document.getElementById('editSaleReason').value.trim(), items, payment };
+                    if (!request.reason) throw new Error('Indica el motivo de la corrección.');
+                    localStorage.setItem(editSalePendingKey(), JSON.stringify(request));
+                    editableSale = { pending: request };
+                }
+                editSaleSubmitting = true;
+                document.getElementById('editSaleSubmit').disabled = true;
+                await callSecureFunction('editSale', request);
+                localStorage.removeItem(editSalePendingKey());
+                window.location.reload();
+            } catch (error) {
+                console.error('No se pudo corregir la venta:', error);
+                if (request && ['functions/invalid-argument', 'functions/failed-precondition', 'functions/already-exists', 'functions/not-found'].includes(error.code)) {
+                    localStorage.removeItem(editSalePendingKey());
+                    editableSale = null;
+                    message.textContent = `${error.message} Cierra y vuelve a cargar la venta.`;
+                } else {
+                    message.textContent = error.message || 'No se pudo verificar la corrección. Reintenta la misma operación.';
+                    if (editableSale?.pending) document.getElementById('editSaleSubmit').textContent = 'Reintentar corrección';
+                }
+            } finally {
+                editSaleSubmitting = false;
+                document.getElementById('editSaleSubmit').disabled = false;
+            }
         }
 
         async function cancelSale(saleId) {
@@ -1676,6 +1895,7 @@ let IPHONE_TRADE_IN_RATES = [];
             await saveLocalState();
             renderSalesTable();
             renderDashboard();
+            refreshSalesSummary();
             renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
@@ -1697,6 +1917,7 @@ let IPHONE_TRADE_IN_RATES = [];
             await saveLocalState();
             renderSalesTable();
             renderDashboard();
+            refreshSalesSummary();
             showToast('Venta eliminada del historial.');
         }
 
@@ -1722,6 +1943,7 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | ${getTicketLabel(sale)}`;
             document.getElementById('receiptCustomerInfo').innerHTML = `
                 <div><strong>Cliente:</strong> ${getSaleCustomerName(sale)}</div>
+                <div><strong>Vendedor:</strong> ${escapeReceiptText(getSaleSellerName(sale))}</div>
                 ${sale.customerPhone && sale.customerPhone !== '-' ? `<div><strong>Teléfono:</strong> ${sale.customerPhone}</div>` : ''}
                 <div><strong>Forma de pago:</strong> ${sale.paymentMethod}</div>
                 ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
@@ -1824,6 +2046,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 pendingSaleId = result.ticketId;
                 sale.backendTicketId = result.ticketId;
                 sale.ticketNumber = result.ticketNumber;
+                sale.sellerName = result.sellerName || 'No registrado';
                 sale.items = sale.items.map(item => {
                     const saved = result.items.find(entry => entry.id === item.id);
                     if (!saved) throw new Error('El backend devolvió un detalle de venta incompleto.');
@@ -1897,6 +2120,7 @@ let IPHONE_TRADE_IN_RATES = [];
             checkoutButton.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Finalizar venta</span>';
             renderPOSTicket();
             renderDashboard();
+            refreshSalesSummary();
             renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
@@ -1992,6 +2216,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 addLine(`Fecha: ${sale.date}`);
                 addLine(getTicketLabel(sale), true);
                 addLine(`Cliente: ${getSaleCustomerName(sale)}`);
+                addLine(`Vendedor: ${getSaleSellerName(sale)}`);
                 if (sale.customerPhone && sale.customerPhone !== '-') addLine(`Teléfono: ${sale.customerPhone}`);
                 addLine(`Forma de pago: ${sale.paymentMethod}`);
                 if (sale.cardPlan) addLine(`Plan de tarjeta: ${sale.cardPlan}`);
@@ -2825,25 +3050,52 @@ let IPHONE_TRADE_IN_RATES = [];
             }
         }
 
+        function confirmProductDeletion() {
+            const modal = document.getElementById('deleteProductConfirmModal');
+            const acceptButton = document.getElementById('deleteProductConfirmAccept');
+            const cancelButton = document.getElementById('deleteProductConfirmCancel');
+            const previousFocus = document.activeElement;
+            return new Promise(resolve => {
+                const finish = confirmed => {
+                    modal.classList.add('hidden');
+                    acceptButton.removeEventListener('click', accept);
+                    cancelButton.removeEventListener('click', cancel);
+                    modal.removeEventListener('click', onBackdrop);
+                    document.removeEventListener('keydown', onKeydown);
+                    previousFocus?.focus?.();
+                    resolve(confirmed);
+                };
+                const accept = () => finish(true);
+                const cancel = () => finish(false);
+                const onBackdrop = event => {
+                    if (event.target === modal) cancel();
+                };
+                const onKeydown = event => {
+                    if (event.key === 'Escape') cancel();
+                    if (event.key === 'Enter' && document.activeElement === acceptButton) accept();
+                };
+                acceptButton.addEventListener('click', accept);
+                cancelButton.addEventListener('click', cancel);
+                modal.addEventListener('click', onBackdrop);
+                document.addEventListener('keydown', onKeydown);
+                modal.classList.remove('hidden');
+                acceptButton.focus();
+            });
+        }
+
         async function deleteProduct(id) {
             if (!requireAdmin()) return;
             const product = PRODUCTS.find(item => item.id === id);
             if (!product) return;
-            if (!confirm(`Se eliminará "${product.title}" del inventario. Las ventas registradas no se modificarán. ¿Continuar?`)) return;
+            document.getElementById('deleteProductConfirmName').textContent = product.title;
+            if (!await confirmProductDeletion()) return;
 
             try {
-                await callSecureFunction('saveInventoryItem', {
-                    id: product.id,
-                    name: product.title,
-                    type: 'acc',
-                    active: false,
-                    stock: product.stock,
-                    priceCents: Math.round(product.price * 100)
-                });
+                await callSecureFunction('deleteInventoryItem', { id: product.id });
                 PRODUCTS = PRODUCTS.filter(item => item.id !== id);
-                await saveLocalState({ throwOnRemoteError: true });
+                localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
             } catch (error) {
-                console.error('No se pudo desactivar el artículo en el inventario seguro:', error);
+                console.error('No se pudo eliminar el artículo del inventario seguro:', error);
                 showToast(error.message || 'No se pudo eliminar el producto.');
                 return;
             }
@@ -3071,22 +3323,28 @@ let IPHONE_TRADE_IN_RATES = [];
                     : { sales: SALES };
                 const payload = sanitizeForFirestore({
                     ...state,
+                    clientWriteId: createOperationId(),
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
-                if (isAdmin()) {
-                    await db.runTransaction(async transaction => {
-                        const snapshot = await transaction.get(appStateRef);
+                await db.runTransaction(async transaction => {
+                    const snapshot = await transaction.get(appStateRef);
+                    if (snapshot.exists && (snapshot.data().salesRevision || 0) !== loadedSalesRevision) {
+                        const error = new Error('Una venta fue corregida en otro dispositivo. Vuelve a iniciar sesión antes de guardar cambios.');
+                        error.code = 'state/stale-sales';
+                        throw error;
+                    }
+                    if (isAdmin()) {
                         if (snapshot.exists && (snapshot.data().dailyDollarRate || 0) !== payload.dailyDollarRate) {
                             const error = new Error('La cotización cambió en otro dispositivo. Vuelve a iniciar sesión antes de guardar cambios.');
                             error.code = 'state/stale-dollar-rate';
                             throw error;
                         }
                         transaction.set(appStateRef, payload, { merge: true });
-                    });
-                } else await appStateRef.update(payload);
+                    } else transaction.update(appStateRef, payload);
+                });
             } catch (error) {
                 console.error('No se pudo guardar el estado en Firestore:', error);
-                if (error.code === 'state/stale-dollar-rate') showToast(error.message);
+                if (error.code === 'state/stale-dollar-rate' || error.code === 'state/stale-sales') showToast(error.message);
                 if (throwOnRemoteError) throw error;
                 return false;
             }
@@ -3120,6 +3378,7 @@ let IPHONE_TRADE_IN_RATES = [];
 
                 if (snapshot.exists && snapshot.data().version === DATA_VERSION) {
                     const remoteState = snapshot.data();
+                    loadedSalesRevision = remoteState.salesRevision || 0;
                     PRODUCTS = remoteState.products || PRODUCTS;
                     PHONES = remoteState.phones || PHONES;
                     SALES = remoteState.sales || SALES;
