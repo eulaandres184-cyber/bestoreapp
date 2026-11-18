@@ -40,6 +40,7 @@ function fixture(options = {}) {
         collection: name => ({
             collectionName: name,
             doc: id => doc(`${name}/${id || `auto${++nextId}`}`),
+            where: (field, operator, value) => ({ collectionName: name, field, operator, value }),
             get: async () => ({
                 docs: [...data.entries()]
                     .filter(([key]) => key.startsWith(`${name}/`))
@@ -54,7 +55,8 @@ function fixture(options = {}) {
                 const writes = [];
                 const tx = {
                     get: async ref => ref.collectionName
-                        ? { docs: [...data.entries()].filter(([key]) => key.startsWith(`${ref.collectionName}/`))
+                        ? { docs: [...data.entries()].filter(([key, value]) => key.startsWith(`${ref.collectionName}/`) &&
+                            (!ref.field || (ref.operator === 'array-contains' && value[ref.field]?.includes(ref.value))))
                             .map(([key, value]) => ({ id: key.slice(ref.collectionName.length + 1), data: () => structuredClone(value) })) }
                         : ({ exists: data.has(ref.path), data: () => structuredClone(data.get(ref.path)) }),
                     create: (ref, value) => writes.push(['create', ref, value]),
@@ -99,6 +101,115 @@ function fixture(options = {}) {
 
 const operationId = 'c0ffcccc-2222-4333-8444-555555555555';
 const payload = { operationId, items: [{ id: 'A', quantity: 1 }], payment: { cashCents: 100000, transferCents: 0, cardBaseCents: 0 } };
+
+test('cuenta corriente actualiza el precio hasta el primer pago y registra cobros idempotentes', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_registers/cash', { open: false, balanceCents: 0 });
+    const saleRequest = { operationId, items: [{ id: 'A', quantity: 1 }], account: true, customerName: 'Ana',
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 } };
+    const sale = await api.recordSale(request('seller', 'seller', saleRequest));
+    assert.equal(data.get('secure_inventory/A').stock, 0);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 0);
+    assert.equal((await api.recordSale(request('seller', 'seller', saleRequest))).ticketId, sale.ticketId);
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), priceCents: 150000 });
+    let [debt] = await api.listCustomerDebts(request('seller', 'seller', {}));
+    assert.equal(debt.balanceCents, 150000);
+    assert.equal(debt.locked, false);
+    const paymentRequest = { operationId: '11111111-2222-4333-8444-555555555555', ticketId: sale.ticketId,
+        expectedTotalCents: 100000, payment: { cashCents: 40000, transferCents: 0, cardBaseCents: 0 } };
+    await assert.rejects(api.recordCustomerDebtPayment(request('seller', 'seller', paymentRequest)), /precio de la deuda cambió/);
+    paymentRequest.expectedTotalCents = 150000;
+    await assert.rejects(api.recordCustomerDebtPayment(request('seller', 'seller', paymentRequest)), /caja cash debe estar abierta/);
+    data.set('secure_registers/cash', { open: true, sessionId: 'session', balanceCents: 0 });
+    const result = await api.recordCustomerDebtPayment(request('seller', 'seller', paymentRequest));
+    assert.equal(result.balanceCents, 110000);
+    await api.recordCustomerDebtPayment(request('seller', 'seller', paymentRequest));
+    assert.equal(data.get('secure_registers/cash').balanceCents, 40000);
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), priceCents: 200000 });
+    [debt] = await api.listCustomerDebts(request('seller', 'seller', {}));
+    assert.equal(debt.totalCents, 150000);
+    assert.equal(debt.balanceCents, 110000);
+    assert.equal(debt.payments.length, 1);
+    assert.ok(Number.isFinite(Date.parse(debt.payments[0].date)));
+    await assert.rejects(api.getEditableSale(request('admin', 'admin', { ticketId: sale.ticketId })), /cuenta corriente/);
+    const finalRequest = { ...paymentRequest, operationId: '22222222-2222-4333-8444-555555555555',
+        payment: { cashCents: 110000, transferCents: 0, cardBaseCents: 0 } };
+    assert.equal((await api.recordCustomerDebtPayment(request('seller', 'seller', finalRequest))).balanceCents, 0);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 150000);
+    assert.equal((await api.listCustomerDebts(request('seller', 'seller', {})))[0].payments.length, 2);
+    await assert.rejects(api.recordCustomerDebtPayment(request('seller', 'seller', { ...finalRequest,
+        operationId: '33333333-2222-4333-8444-555555555555' })), /supera el saldo/);
+});
+
+test('pago inicial fija el precio y venta sin pago protege el producto de eliminación', async () => {
+    const { data, api, request } = fixture();
+    data.set('app_state/main', { products: [{ id: 'A' }], phones: [] });
+    const empty = { cashCents: 0, transferCents: 0, cardBaseCents: 0 };
+    await assert.rejects(api.recordSale(request('seller', 'seller', {
+        operationId, items: [{ id: 'A', quantity: 1 }], account: true, payment: empty
+    })), /nombre del cliente/);
+    const sale = await api.recordSale(request('seller', 'seller', {
+        operationId, items: [{ id: 'A', quantity: 1 }], account: true, customerName: 'Ana', payment: empty
+    }));
+    await assert.rejects(api.deleteInventoryItem(request('admin', 'admin', { id: 'A' })), /deudas cuyo precio/);
+    await api.recordCustomerDebtPayment(request('seller', 'seller', {
+        operationId: '11111111-2222-4333-8444-555555555555', ticketId: sale.ticketId, expectedTotalCents: 100000,
+        payment: { cashCents: 10000, transferCents: 0, cardBaseCents: 0 }
+    }));
+    await api.deleteInventoryItem(request('admin', 'admin', { id: 'A' }));
+    assert.equal((await api.listCustomerDebts(request('seller', 'seller', {})))[0].balanceCents, 90000);
+
+    const second = fixture();
+    const initial = await second.api.recordSale(second.request('seller', 'seller', {
+        operationId, items: [{ id: 'A', quantity: 1 }], account: true, customerName: 'Juan',
+        payment: { cashCents: 25000, transferCents: 0, cardBaseCents: 0 }
+    }));
+    second.data.set('secure_inventory/A', { ...second.data.get('secure_inventory/A'), priceCents: 200000 });
+    const [debt] = await second.api.listCustomerDebts(second.request('seller', 'seller', {}));
+    assert.equal(debt.ticketId, initial.ticketId);
+    assert.equal(debt.totalCents, 100000);
+    assert.equal(debt.balanceCents, 75000);
+    assert.equal(debt.payments.length, 1);
+    assert.equal(second.data.get('secure_registers/cash').balanceCents, 25000);
+});
+
+test('cobros simultáneos no exceden la deuda y tarjeta acredita el neto', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_registers/card', { open: true, sessionId: 'card-session', balanceCents: 0 });
+    data.set('secure_register_sessions/card-session', { open: true, balanceCents: 0 });
+    const sale = await api.recordSale(request('seller', 'seller', {
+        operationId, items: [{ id: 'A', quantity: 1 }], account: true, customerName: 'Ana',
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 }
+    }));
+    const pay = { ticketId: sale.ticketId, expectedTotalCents: 100000,
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 60000, cardPlan: 'phone-mp-3' } };
+    const results = await Promise.allSettled([
+        api.recordCustomerDebtPayment(request('seller', 'seller', { ...pay, operationId: '11111111-2222-4333-8444-555555555555' })),
+        api.recordCustomerDebtPayment(request('seller', 'seller', { ...pay, operationId: '22222222-2222-4333-8444-555555555555' }))
+    ]);
+    assert.deepEqual(results.map(result => result.status), ['fulfilled', 'rejected']);
+    const payment = results[0].value.payment;
+    assert.equal(data.get('secure_registers/card').balanceCents, payment.cardNetCents);
+    assert.equal(data.get('secure_register_sessions/card-session').balanceCents, payment.cardNetCents);
+    const [debt] = await api.listCustomerDebts(request('seller', 'seller', {}));
+    assert.equal(debt.balanceCents, 40000);
+    assert.equal(debt.payments[0].payment.cardTotalCents, payment.cardTotalCents);
+});
+
+test('el pago inicial no registra venta si la sesión de caja está cerrada o desincronizada', async () => {
+    const { data, api, request } = fixture();
+    const input = {
+        operationId, items: [{ id: 'A', quantity: 1 }], account: true, customerName: 'Ana',
+        payment: { cashCents: 25000, transferCents: 0, cardBaseCents: 0 }
+    };
+    data.set('secure_register_sessions/session', { open: false, balanceCents: 0 });
+    await assert.rejects(api.recordSale(request('seller', 'seller', input)), /sesión de caja/);
+    data.set('secure_register_sessions/session', { open: true, balanceCents: 5 });
+    await assert.rejects(api.recordSale(request('seller', 'seller', input)), /sesión de caja/);
+    assert.equal(data.get('secure_inventory/A').stock, 1);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 0);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_customer_debts/')).length, 0);
+});
 
 test('solo BeStore puede modificar la clave de otro usuario y se registra sin guardar la clave', async () => {
     const { data, api, request, passwords } = fixture();
@@ -687,6 +798,141 @@ test('devolución repone opcionalmente, debita caja y es idempotente', async () 
     assert.equal(data.get('secure_inventory/A').active, true);
     assert.equal(data.get('secure_registers/cash').balanceCents, 0);
     await assert.rejects(api.recordReturn(request('admin', 'admin', { ...returnPayload, operationId: 'c0ffcccc-2222-4333-8444-555555555558' })), error => error.code === 'failed-precondition');
+});
+
+test('devolución crea saldo a favor sin mover caja y cambio equivalente conserva el precio original', async () => {
+    const { data, api, request } = fixture();
+    const sale = await api.recordSale(request('seller', 'seller', payload));
+    const create = { operationId: '01234567-1234-4234-8234-012345678900',
+        ticketId: sale.ticketId, customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: true }] };
+    await assert.rejects(api.createReturnCredit(request('seller', 'seller', create)), error => error.code === 'permission-denied');
+    const credit = await api.createReturnCredit(request('admin', 'admin', create));
+    assert.equal((await api.createReturnCredit(request('admin', 'admin', create))).creditId, credit.creditId);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 100000);
+    assert.equal(data.get('secure_inventory/A').stock, 1);
+    assert.equal(data.get(`secure_sales/${sale.ticketId}`).refundedSources.cash, 100000);
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), priceCents: 150000 });
+    const resolve = { operationId: '01234567-1234-4234-8234-012345678901', creditId: credit.creditId,
+        expectedBalanceCents: 100000, items: [{ id: 'A', quantity: 1, expectedPriceCents: 150000 }],
+        remainder: 'keep', payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 } };
+    const result = await api.resolveReturnCredit(request('admin', 'admin', resolve));
+    assert.equal(result.balanceCents, 0);
+    assert.equal(result.valueCents, 100000);
+    assert.equal(result.items[0].sameQty, 1);
+    await api.resolveReturnCredit(request('admin', 'admin', resolve));
+    assert.equal(data.get('secure_inventory/A').stock, 0);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 100000);
+    assert.equal([...data.keys()].filter(key => key.startsWith('secure_return_exchanges/')).length, 1);
+});
+
+test('cambio inferior conserva saldo o reintegra; cambio superior cobra diferencia atómicamente', async () => {
+    const { data, api, request } = fixture();
+    const sale = await api.recordSale(request('seller', 'seller', payload));
+    const credit = await api.createReturnCredit(request('admin', 'admin', {
+        operationId: '01234567-1234-4234-8234-012345678910', ticketId: sale.ticketId,
+        customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: false }]
+    }));
+    data.set('secure_inventory/B', { active: true, name: 'Funda', type: 'acc', stock: 5, priceCents: 40000 });
+    const payment = { cashCents: 0, transferCents: 0, cardBaseCents: 0 };
+    const resolve = { operationId: '01234567-1234-4234-8234-012345678911', creditId: credit.creditId,
+        expectedBalanceCents: 100000, items: [{ id: 'B', quantity: 1, expectedPriceCents: 40000 }], remainder: 'keep', payment };
+    const kept = await api.resolveReturnCredit(request('admin', 'admin', resolve));
+    assert.equal(kept.balanceCents, 60000);
+    assert.equal(data.get('secure_inventory/B').stock, 4);
+    const more = { ...resolve, operationId: '01234567-1234-4234-8234-012345678912', expectedBalanceCents: 60000,
+        items: [{ id: 'B', quantity: 2, expectedPriceCents: 40000 }] };
+    await assert.rejects(api.resolveReturnCredit(request('admin', 'admin', more)), /cubrir exactamente/);
+    assert.equal(data.get('secure_inventory/B').stock, 4);
+    more.payment = { ...payment, cashCents: 20000 };
+    const paid = await api.resolveReturnCredit(request('admin', 'admin', more));
+    assert.equal(paid.balanceCents, 0);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 120000);
+    assert.equal(data.get('secure_inventory/B').stock, 2);
+
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), stock: 1 });
+    const secondSale = await api.recordSale(request('seller', 'seller', { ...payload, operationId: '01234567-1234-4234-8234-012345678913' }));
+    const secondCredit = await api.createReturnCredit(request('admin', 'admin', {
+        operationId: '01234567-1234-4234-8234-012345678914', ticketId: secondSale.ticketId,
+        customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: false }]
+    }));
+    const refund = { ...resolve, operationId: '01234567-1234-4234-8234-012345678915', creditId: secondCredit.creditId, remainder: 'cash' };
+    const done = await api.resolveReturnCredit(request('admin', 'admin', refund));
+    assert.equal(done.refundCents, 60000);
+    assert.equal(done.balanceCents, 0);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 160000);
+});
+
+test('devoluciones rechazan celulares y ventas en cuenta corriente', async () => {
+    const { data, api, request } = fixture();
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), type: 'phone' });
+    const sale = await api.recordSale(request('seller', 'seller', payload));
+    const create = { operationId: '01234567-1234-4234-8234-012345678916', ticketId: sale.ticketId,
+        customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: false }] };
+    assert.equal((await api.getReturnableSale(request('admin', 'admin', { ticketId: sale.ticketId }))).items.length, 0);
+    await assert.rejects(api.createReturnCredit(request('admin', 'admin', create)), /Solo se pueden devolver accesorios/);
+    await assert.rejects(api.recordReturn(request('admin', 'admin', { ...create,
+        source: { cash: 100000, transfer: 0, cardToCash: 0, cardToTransfer: 0 } })), /celulares no admiten/);
+    data.set('secure_inventory/A', { ...data.get('secure_inventory/A'), type: 'acc', stock: 1 });
+    const accountSale = await api.recordSale(request('seller', 'seller', {
+        ...payload, operationId: '01234567-1234-4234-8234-012345678917', account: true, customerName: 'Ana',
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 }
+    }));
+    await assert.rejects(api.createReturnCredit(request('admin', 'admin', { ...create, ticketId: accountSale.ticketId })), /cuenta corriente/);
+});
+
+test('una gestión rechaza precios desactualizados, fondos insuficientes y operaciones concurrentes', async () => {
+    const { data, api, request } = fixture();
+    const sale = await api.recordSale(request('seller', 'seller', payload));
+    const credit = await api.createReturnCredit(request('admin', 'admin', {
+        operationId: '01234567-1234-4234-8234-012345678920', ticketId: sale.ticketId,
+        customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: true }]
+    }));
+    const base = { creditId: credit.creditId, expectedBalanceCents: 100000,
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 } };
+    await assert.rejects(api.resolveReturnCredit(request('admin', 'admin', {
+        ...base, operationId: '01234567-1234-4234-8234-012345678921',
+        items: [{ id: 'A', quantity: 1, expectedPriceCents: 99999 }], remainder: 'keep'
+    })), /precio.*cambió/);
+    data.set('secure_registers/cash', { open: true, sessionId: 'session', balanceCents: 50000 });
+    data.set('secure_register_sessions/session', { open: true, balanceCents: 50000 });
+    await assert.rejects(api.resolveReturnCredit(request('admin', 'admin', {
+        ...base, operationId: '01234567-1234-4234-8234-012345678922', items: [], remainder: 'cash'
+    })), /Saldo de caja/);
+    assert.equal(data.get(`secure_return_credits/${credit.creditId}`).balanceCents, 100000);
+    data.set('secure_registers/cash', { open: true, sessionId: 'session', balanceCents: 100000 });
+    data.set('secure_register_sessions/session', { open: true, balanceCents: 100000 });
+    const result = await Promise.allSettled([
+        api.resolveReturnCredit(request('admin', 'admin', {
+            ...base, operationId: '01234567-1234-4234-8234-012345678923', items: [], remainder: 'cash'
+        })),
+        api.resolveReturnCredit(request('admin', 'admin', {
+            ...base, operationId: '01234567-1234-4234-8234-012345678924', items: [], remainder: 'cash'
+        }))
+    ]);
+    assert.deepEqual(result.map(item => item.status), ['fulfilled', 'rejected']);
+    assert.equal(data.get('secure_registers/cash').balanceCents, 0);
+    assert.equal(data.get(`secure_return_credits/${credit.creditId}`).balanceCents, 0);
+});
+
+test('el cambio de mayor valor acepta tarjeta y acredita el neto en su caja', async () => {
+    const { data, api, request } = fixture();
+    const sale = await api.recordSale(request('seller', 'seller', payload));
+    const credit = await api.createReturnCredit(request('admin', 'admin', {
+        operationId: '01234567-1234-4234-8234-012345678930', ticketId: sale.ticketId,
+        customerName: 'Ana', reason: 'Cambio', items: [{ id: 'A', quantity: 1, restock: false }]
+    }));
+    data.set('secure_inventory/B', { active: true, name: 'Otro', type: 'acc', stock: 1, priceCents: 160000 });
+    data.set('secure_registers/card', { open: true, sessionId: 'card-session', balanceCents: 0 });
+    data.set('secure_register_sessions/card-session', { open: true, balanceCents: 0 });
+    const result = await api.resolveReturnCredit(request('admin', 'admin', {
+        operationId: '01234567-1234-4234-8234-012345678931', creditId: credit.creditId,
+        expectedBalanceCents: 100000, items: [{ id: 'B', quantity: 1, expectedPriceCents: 160000 }], remainder: 'keep',
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 60000, cardPlan: 'phone-mp-3' }
+    }));
+    assert.equal(result.balanceCents, 0);
+    assert.equal(data.get('secure_registers/card').balanceCents, result.payment.cardNetCents);
+    const exchange = [...data.entries()].find(([key]) => key.startsWith('secure_return_exchanges/'))[1];
+    assert.equal(exchange.totalCents, 160000 + result.payment.cardTotalCents - 60000);
 });
 
 test('tarjeta reintegrada en transferencia, sin reponer producto averiado', async () => {

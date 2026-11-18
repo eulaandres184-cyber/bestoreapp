@@ -2,10 +2,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calculateSale, normalizeItems } = require('../domain');
+const { calculateSale, normalizeItems, returnAlertPeriods } = require('../domain');
 
 const catalog = { ACC1: { active: true, name: 'Cable', stock: 5, priceCents: 10000000 } };
 const item = [{ id: 'ACC1', quantity: 1 }];
+
+test('avisa cada 48 horas exactas desde la devolución', () => {
+    const interval = 48 * 60 * 60 * 1000;
+    assert.equal(returnAlertPeriods(1000, 1000 + interval - 1), 0);
+    assert.equal(returnAlertPeriods(1000, 1000 + interval), 1);
+    assert.equal(returnAlertPeriods(1000, 1000 + interval * 2), 2);
+    assert.equal(returnAlertPeriods(1000, 999), 0);
+    assert.throws(() => returnAlertPeriods(NaN), /Fecha/);
+});
 
 test('calcula los seis planes sobre el precio de catálogo', () => {
     for (const [plan, expected] of [

@@ -37,7 +37,7 @@ function normalizeItems(items) {
     });
 }
 
-function calculateSale(items, catalog, payment) {
+function calculateSale(items, catalog, payment, account = false) {
     const lines = items.map(item => {
         const product = catalog[item.id];
         assert(product && product.active === true, `El artículo ${item.id} no está disponible.`, 'failed-precondition');
@@ -53,7 +53,23 @@ function calculateSale(items, catalog, payment) {
     const cash = money(payment.cashCents, 'Efectivo');
     const transfer = money(payment.transferCents, 'Transferencia');
     const cardBase = money(payment.cardBaseCents, 'Tarjeta');
-    assert(money(cash + transfer + cardBase, 'Pago') === subtotal, 'Los medios de pago deben cubrir exactamente el subtotal.');
+    const paid = money(cash + transfer + cardBase, 'Pago');
+    assert(account ? subtotal > 0 && paid < subtotal : paid === subtotal,
+        account ? 'La cuenta corriente debe tener saldo pendiente.' : 'Los medios de pago deben cubrir exactamente el subtotal.');
+    const calculatedPayment = calculatePayment(payment);
+    return {
+        items: lines,
+        subtotalCents: subtotal,
+        totalCents: money(subtotal + calculatedPayment.cardTotalCents - cardBase, 'Total'),
+        payment: calculatedPayment
+    };
+}
+
+function calculatePayment(payment) {
+    assert(payment && typeof payment === 'object', 'Forma de pago inválida.');
+    const cash = money(payment.cashCents, 'Efectivo');
+    const transfer = money(payment.transferCents, 'Transferencia');
+    const cardBase = money(payment.cardBaseCents, 'Tarjeta');
     let cardTotal = 0;
     let cardNet = 0;
     let cardPlan = '';
@@ -66,12 +82,12 @@ function calculateSale(items, catalog, payment) {
         cardNet = Math.round(cardTotal * (1 - plan.cost));
         cardPlan = plan.label;
     }
-    return {
-        items: lines,
-        subtotalCents: subtotal,
-        totalCents: money(cash + transfer + cardTotal, 'Total'),
-        payment: { cashCents: cash, transferCents: transfer, cardBaseCents: cardBase, cardTotalCents: cardTotal, cardNetCents: cardNet, cardPlan }
-    };
+    return { cashCents: cash, transferCents: transfer, cardBaseCents: cardBase, cardTotalCents: cardTotal, cardNetCents: cardNet, cardPlan };
 }
 
-module.exports = { DomainError, assert, money, normalizeItems, calculateSale, plans };
+function returnAlertPeriods(createdAt, now = Date.now()) {
+    assert(Number.isFinite(createdAt) && Number.isFinite(now), 'Fecha de devolución inválida.', 'failed-precondition');
+    return Math.max(0, Math.floor((now - createdAt) / (48 * 60 * 60 * 1000)));
+}
+
+module.exports = { DomainError, assert, money, normalizeItems, calculateSale, calculatePayment, returnAlertPeriods, plans };

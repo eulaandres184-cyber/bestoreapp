@@ -36,7 +36,7 @@ function legacyDate(value) {
     return `${year.toString().padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function summarizeSales(secureSales, legacySales, now = new Date()) {
+function summarizeSales(secureSales, legacySales, now = new Date(), exchanges = []) {
     const today = dateFormatter.format(now);
     const result = { todayCount: 0, todayCents: 0, totalCount: 0, netCents: 0 };
     const secureIds = new Set(secureSales.map(sale => sale.id));
@@ -59,6 +59,12 @@ function summarizeSales(secureSales, legacySales, now = new Date()) {
             (sum, key) => addCents(sum, checkedCents(refunded[key], `Devolución de ${sale.id}`)), 0
         );
         include(dateFormatter.format(date), checkedCents(sale.totalCents, `Total de ${sale.id}`), refundCents);
+    }
+
+    for (const exchange of exchanges) {
+        const date = exchange.createdAt?.toDate?.();
+        if (!(date instanceof Date) || !Number.isFinite(date.getTime())) invalid(`Fecha inválida en el cambio ${exchange.id}.`);
+        include(dateFormatter.format(date), checkedCents(exchange.totalCents, `Total del cambio ${exchange.id}`), 0);
     }
 
     const legacyIds = new Set();

@@ -5,7 +5,7 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { createHash, randomUUID } = require('node:crypto');
-const { DomainError, assert, money, normalizeItems, calculateSale } = require('./domain');
+const { DomainError, assert, money, normalizeItems, calculateSale, calculatePayment, returnAlertPeriods } = require('./domain');
 const { previewMigration } = require('./migration');
 const { summarizeSales } = require('./sales-summary');
 
@@ -183,13 +183,14 @@ exports.getSalesSummary = guarded(async request => {
     const stateRef = db.doc('app_state/main');
     const salesRef = db.collection('secure_sales');
     return db.runTransaction(async tx => {
-        const [profile, state, sales] = await Promise.all([
-            tx.get(profileRef), tx.get(stateRef), tx.get(salesRef)
+        const [profile, state, sales, exchanges] = await Promise.all([
+            tx.get(profileRef), tx.get(stateRef), tx.get(salesRef), tx.get(db.collection('secure_return_exchanges'))
         ]);
         authorize(request, profile);
         assert(state.exists && Array.isArray(state.data().sales),
             'No se encontró el historial de ventas anterior.', 'failed-precondition');
-        return summarizeSales(sales.docs.map(doc => ({ ...doc.data(), id: doc.id })), state.data().sales);
+        return summarizeSales(sales.docs.map(doc => ({ ...doc.data(), id: doc.id })), state.data().sales,
+            new Date(), exchanges.docs.map(doc => ({ ...doc.data(), id: doc.id })));
     });
 });
 
@@ -336,10 +337,13 @@ exports.deleteInventoryItem = guarded(async request => {
     const stateRef = db.doc('app_state/main');
     const auditRef = db.collection('secure_inventory_audit').doc();
     return db.runTransaction(async tx => {
-        const [profile, item, state] = await Promise.all([
-            tx.get(profileRef), tx.get(itemRef), tx.get(stateRef)
+        const [profile, item, state, debts] = await Promise.all([
+            tx.get(profileRef), tx.get(itemRef), tx.get(stateRef),
+            tx.get(db.collection('secure_customer_debts').where('itemIds', 'array-contains', id))
         ]);
         authorize(request, profile, true);
+        assert(!debts.docs.some(debt => debt.data().lockedTotalCents === null),
+            'No se puede eliminar un producto con deudas cuyo precio todavía se actualiza.', 'failed-precondition');
         assert(item.exists && item.data().type === 'acc', 'No se encontró el producto en el inventario.', 'not-found');
         assert(state.exists && Array.isArray(state.data().products), 'El inventario del historial no es válido.', 'failed-precondition');
         const products = state.data().products.filter(product => product.id !== id);
@@ -351,6 +355,96 @@ exports.deleteInventoryItem = guarded(async request => {
             createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
         });
         return { id };
+    });
+});
+
+function debtTotal(debt, inventory) {
+    if (debt.lockedTotalCents !== null) return money(debt.lockedTotalCents, 'Total de deuda');
+    return debt.items.reduce((total, item, index) => {
+        assert(inventory[index].exists, `No se encontró el precio actual de ${item.name}.`, 'failed-precondition');
+        const price = money(inventory[index].data().priceCents, `Precio de ${item.name}`);
+        return money(total + money(price * item.quantity, 'Importe de deuda'), 'Total de deuda');
+    }, 0);
+}
+
+exports.listCustomerDebts = guarded(async request => {
+    const profile = await db.doc(`users/${request.auth.uid}`).get();
+    authorize(request, profile);
+    const snapshot = await db.collection('secure_customer_debts').get();
+    return Promise.all(snapshot.docs.map(async doc => {
+        const debt = doc.data();
+        const inventory = debt.lockedTotalCents === null
+            ? await Promise.all(debt.items.map(item => db.doc(`secure_inventory/${item.id}`).get())) : [];
+        const totalCents = debtTotal(debt, inventory);
+        const paidCents = money(debt.paidCents, 'Pagos');
+        assert(paidCents <= totalCents, 'El saldo de la deuda es inválido.', 'failed-precondition');
+        return { ticketId: doc.id, ticketNumber: debt.ticketNumber, customerName: debt.customerName,
+            items: debt.items, totalCents, paidCents, balanceCents: totalCents - paidCents,
+            locked: debt.lockedTotalCents !== null, payments: debt.payments,
+            createdAt: debt.createdAt?.toDate?.().toISOString() || null };
+    }));
+});
+
+exports.recordCustomerDebtPayment = guarded(async request => {
+    const data = request.data || {};
+    const ticketId = requestId(data.ticketId);
+    const operationId = requestId(data.operationId);
+    const expectedTotalCents = money(data.expectedTotalCents, 'Total esperado');
+    const payment = calculatePayment(data.payment);
+    const baseCents = money(payment.cashCents + payment.transferCents + payment.cardBaseCents, 'Pago');
+    assert(baseCents > 0, 'El pago debe ser mayor que cero.');
+    const hash = fingerprint({ ticketId, expectedTotalCents, payment: data.payment });
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const debtRef = db.doc(`secure_customer_debts/${ticketId}`);
+    const opRef = db.doc(`secure_customer_debt_operations/${request.auth.uid}_${operationId}`);
+    const registerRefs = registers.map(medium => db.doc(`secure_registers/${medium}`));
+    return db.runTransaction(async tx => {
+        const [profile, debtSnapshot, operation, ...registerSnapshots] = await Promise.all([
+            tx.get(profileRef), tx.get(debtRef), tx.get(opRef), ...registerRefs.map(ref => tx.get(ref))
+        ]);
+        authorize(request, profile);
+        if (operation.exists) {
+            assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra operación.', 'already-exists');
+            return operation.data().result;
+        }
+        assert(debtSnapshot.exists, 'No se encontró la deuda.', 'not-found');
+        const debt = debtSnapshot.data();
+        const inventory = debt.lockedTotalCents === null
+            ? await Promise.all(debt.items.map(item => tx.get(db.doc(`secure_inventory/${item.id}`)))) : [];
+        const totalCents = debtTotal(debt, inventory);
+        assert(totalCents === expectedTotalCents, 'El precio de la deuda cambió. Actualiza la lista antes de cobrar.', 'failed-precondition');
+        const paidCents = money(debt.paidCents, 'Pagos');
+        assert(baseCents <= totalCents - paidCents, 'El pago supera el saldo pendiente.', 'failed-precondition');
+        const amounts = [payment.cashCents, payment.transferCents, payment.cardNetCents];
+        const sessions = await Promise.all(registerSnapshots.map((snapshot, index) => {
+            if (!amounts[index]) return null;
+            assert(snapshot.exists && snapshot.data().open === true && typeof snapshot.data().sessionId === 'string',
+                `La caja ${registers[index]} debe estar abierta.`, 'failed-precondition');
+            money(snapshot.data().balanceCents + amounts[index], 'Saldo de caja');
+            return tx.get(db.doc(`secure_register_sessions/${snapshot.data().sessionId}`));
+        }));
+        sessions.forEach((session, index) => {
+            if (amounts[index]) assert(session?.exists && session.data().open === true &&
+                session.data().balanceCents === registerSnapshots[index].data().balanceCents,
+            `La sesión de caja ${registers[index]} no está disponible.`, 'failed-precondition');
+        });
+        registerSnapshots.forEach((snapshot, index) => {
+            if (!amounts[index]) return;
+            const register = snapshot.data();
+            const balanceCents = register.balanceCents + amounts[index];
+            tx.update(registerRefs[index], { balanceCents });
+            tx.update(db.doc(`secure_register_sessions/${register.sessionId}`), { balanceCents });
+            tx.create(db.collection('secure_cash_movements').doc(), {
+                medium: registers[index], amountCents: amounts[index], sessionId: register.sessionId,
+                saleId: ticketId, debtPaymentOperationId: operationId,
+                createdAt: FieldValue.serverTimestamp(), createdBy: request.auth.uid
+            });
+        });
+        const entry = { payment, baseCents, date: new Date().toISOString(), createdBy: request.auth.uid };
+        tx.update(debtRef, { lockedTotalCents: totalCents, paidCents: paidCents + baseCents, payments: [...debt.payments, entry] });
+        const result = { ticketId, totalCents, paidCents: paidCents + baseCents, balanceCents: totalCents - paidCents - baseCents, payment };
+        tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
+        return result;
     });
 });
 
@@ -617,10 +711,12 @@ exports.recordSale = guarded(async request => {
     const items = normalizeItems(data.items);
     const customerName = typeof data.customerName === 'string' ? data.customerName.trim() : '';
     assert(customerName.length <= 120, 'Nombre de cliente demasiado largo.');
+    const account = data.account === true;
+    if (account) assert(customerName && customerName.toLowerCase() !== 'consumidor final', 'Indica el nombre del cliente para la cuenta corriente.');
     const payment = data.payment;
     const quoteIds = (data.items || []).map(item => item.quoteId == null ? null : requestId(item.quoteId));
     assert(new Set(quoteIds.filter(Boolean)).size === quoteIds.filter(Boolean).length, 'Cotizaciones duplicadas.');
-    const hash = fingerprint({ items, customerName, payment, ...(quoteIds.some(Boolean) ? { quoteIds } : {}) });
+    const hash = fingerprint({ items, customerName, payment, ...(account ? { account } : {}), ...(quoteIds.some(Boolean) ? { quoteIds } : {}) });
     const profileRef = db.doc(`users/${request.auth.uid}`);
     const opRef = db.collection('secure_sale_operations').doc(`${request.auth.uid}_${operationId}`);
     const saleRef = db.collection('secure_sales').doc(randomUUID());
@@ -680,13 +776,25 @@ exports.recordSale = guarded(async request => {
             'La cotización del celular no está disponible.', 'failed-precondition');
             catalog[items[index].id] = { ...catalog[items[index].id], priceCents: money(quote.data().priceCents, 'Precio cotizado') };
         });
-        const sale = calculateSale(items, catalog, payment);
+        const sale = calculateSale(items, catalog, payment, account);
         const movements = [sale.payment.cashCents, sale.payment.transferCents, sale.payment.cardNetCents];
         registerSnapshots.forEach((snapshot, index) => {
             if (movements[index] === 0) return;
             assert(snapshot.exists && snapshot.data().open === true, `La caja ${registers[index]} debe estar abierta.`, 'failed-precondition');
             money(snapshot.data().balanceCents + movements[index], 'Saldo de caja');
         });
+        if (account) {
+            const sessions = await Promise.all(registerSnapshots.map((snapshot, index) => {
+                if (!movements[index]) return null;
+                assert(typeof snapshot.data().sessionId === 'string', `La sesión de caja ${registers[index]} no está disponible.`, 'failed-precondition');
+                return tx.get(db.doc(`secure_register_sessions/${snapshot.data().sessionId}`));
+            }));
+            sessions.forEach((session, index) => {
+                if (movements[index]) assert(session?.exists && session.data().open === true &&
+                    session.data().balanceCents === registerSnapshots[index].data().balanceCents,
+                `La sesión de caja ${registers[index]} no está disponible.`, 'failed-precondition');
+            });
+        }
 
         stockSnapshots.forEach((snapshot, index) => {
             tx.update(stockRefs[index], { stock: snapshot.data().stock - items[index].quantity });
@@ -714,7 +822,17 @@ exports.recordSale = guarded(async request => {
             }))
         };
         tx.set(ticketCounterRef, { lastTicketNumber: ticketNumber });
-        tx.create(saleRef, { ...result, customerName: customerName || 'Consumidor Final', status: 'Confirmada', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        tx.create(saleRef, { ...result, account, customerName: customerName || 'Consumidor Final', status: 'Confirmada', createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        if (account) {
+            const paidCents = sale.payment.cashCents + sale.payment.transferCents + sale.payment.cardBaseCents;
+            tx.create(db.doc(`secure_customer_debts/${saleRef.id}`), {
+                ticketId: saleRef.id, ticketNumber, customerName, items: sale.items,
+                itemIds: sale.items.map(item => item.id), paidCents,
+                lockedTotalCents: paidCents ? sale.subtotalCents : null,
+                payments: paidCents ? [{ payment: sale.payment, baseCents: paidCents, date: new Date().toISOString(), createdBy: request.auth.uid }] : [],
+                createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+            });
+        }
         tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
         return result;
     });
@@ -728,6 +846,7 @@ exports.getEditableSale = guarded(async request => {
     authorize(request, profile, true);
     assert(sale.exists && sale.data().status === 'Confirmada', 'La venta no existe.', 'not-found');
     const data = sale.data();
+    assert(!data.account, 'Las ventas en cuenta corriente no admiten correcciones desde este módulo.', 'failed-precondition');
     assert(!Object.values(data.returnedQuantities || {}).some(value => value > 0),
         'No se puede editar una venta con devoluciones.', 'failed-precondition');
     return { ticketId, revision: data.revision || 0, items: data.items, payment: data.payment };
@@ -759,6 +878,7 @@ exports.editSale = guarded(async request => {
         }
         assert(saleSnapshot.exists && saleSnapshot.data().status === 'Confirmada', 'La venta no existe.', 'not-found');
         const sale = saleSnapshot.data();
+        assert(!sale.account, 'Las ventas en cuenta corriente no admiten correcciones desde este módulo.', 'failed-precondition');
         assert((sale.revision || 0) === data.revision, 'La venta cambió. Vuelve a cargarla antes de guardar.', 'failed-precondition');
         assert(!Object.values(sale.returnedQuantities || {}).some(value => value > 0),
             'No se puede editar una venta con devoluciones.', 'failed-precondition');
@@ -932,12 +1052,14 @@ exports.recordReturn = guarded(async request => {
         }
         assert(saleSnapshot.exists && saleSnapshot.data().status === 'Confirmada', 'La venta no existe o no admite devoluciones.', 'failed-precondition');
         const sale = saleSnapshot.data();
+        assert(!sale.account, 'Las ventas en cuenta corriente no admiten devoluciones desde este módulo.', 'failed-precondition');
         const returned = { ...(sale.returnedQuantities || {}) };
         const previous = { cash: 0, transfer: 0, card: 0, ...(sale.refundedSources || {}) };
         let totalCents = 0;
         const lines = returnItems.map((item, index) => {
             const line = sale.items.find(entry => entry.id === item.id);
             assert(line && Number.isSafeInteger(line.quantity) && Number.isSafeInteger(line.unitPriceCents), 'El artículo no pertenece a la venta o su importe es inválido.', 'failed-precondition');
+            assert(line.type === 'acc', 'Los celulares no admiten devoluciones.', 'failed-precondition');
             const already = returned[item.id] || 0;
             assert(Number.isSafeInteger(already) && already >= 0 && already + item.quantity <= line.quantity, 'La cantidad supera las unidades disponibles para devolución.', 'failed-precondition');
             returned[item.id] = already + item.quantity;
@@ -950,6 +1072,7 @@ exports.recordReturn = guarded(async request => {
             }
             return { ...item, name: line.name, unitPriceCents: line.unitPriceCents };
         });
+
         const cardRefund = money(allocation.cardToCash + allocation.cardToTransfer, 'Reembolso de tarjeta');
         assert(money(allocation.cash + allocation.transfer + cardRefund, 'Reembolso') === totalCents, 'El desglose debe coincidir con el precio base devuelto.');
         assert(previous.cash + allocation.cash <= sale.payment.cashCents &&
@@ -982,6 +1105,212 @@ exports.recordReturn = guarded(async request => {
         } });
         const result = { returnId: returnRef.id, ticketId: saleRef.id, items: lines, reason, totalCents, allocation };
         tx.create(returnRef, { ...result, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
+        return result;
+    });
+});
+
+exports.getReturnableSale = guarded(async request => {
+    const ticketId = requestId(request.data?.ticketId);
+    const [profile, snapshot] = await Promise.all([
+        db.doc(`users/${request.auth.uid}`).get(), db.doc(`secure_sales/${ticketId}`).get()
+    ]);
+    authorize(request, profile, true);
+    assert(snapshot.exists && snapshot.data().status === 'Confirmada', 'No se encontró la venta.', 'not-found');
+    const sale = snapshot.data();
+    assert(!sale.account, 'Las ventas en cuenta corriente no admiten devoluciones.', 'failed-precondition');
+    assert(Number.isSafeInteger(sale.ticketNumber) && sale.ticketNumber > 0,
+        'La venta no tiene un número de ticket asignado. Actualiza la sesión.', 'failed-precondition');
+    assert(Array.isArray(sale.items), 'El detalle de venta no es válido.', 'failed-precondition');
+    const items = sale.items.filter(item => item.type === 'acc').map(item => ({
+        id: item.id, name: item.name, unitPriceCents: item.unitPriceCents,
+        available: item.quantity - (sale.returnedQuantities?.[item.id] || 0)
+    })).filter(item => item.available > 0);
+    return { ticketId, ticketNumber: sale.ticketNumber, customerName: sale.customerName, items };
+});
+
+exports.createReturnCredit = guarded(async request => {
+    const data = request.data || {};
+    const operationId = requestId(data.operationId);
+    const ticketId = requestId(data.ticketId);
+    const items = normalizeItems(data.items);
+    assert(data.items.every(item => typeof item.restock === 'boolean'), 'Indica si cada artículo vuelve al stock.');
+    const returns = items.map((item, index) => ({ ...item, restock: data.items[index].restock }));
+    const customerName = typeof data.customerName === 'string' ? data.customerName.trim() : '';
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    assert(customerName && customerName.length <= 120 && customerName.toLowerCase() !== 'consumidor final', 'Indica el nombre del cliente.');
+    assert(reason && reason.length <= 500, 'Indica el motivo de la devolución.');
+    const hash = fingerprint({ ticketId, returns, customerName, reason });
+    const profileRef = db.doc(`users/${request.auth.uid}`);
+    const saleRef = db.doc(`secure_sales/${ticketId}`);
+    const opRef = db.doc(`secure_return_credit_operations/${request.auth.uid}_${operationId}`);
+    const creditRef = db.collection('secure_return_credits').doc(randomUUID());
+    const refs = returns.map(item => db.doc(`secure_inventory/${item.id}`));
+    return db.runTransaction(async tx => {
+        const [profile, saleSnapshot, operation, ...inventory] = await Promise.all([
+            tx.get(profileRef), tx.get(saleRef), tx.get(opRef), ...refs.map(ref => tx.get(ref))
+        ]);
+        authorize(request, profile, true);
+        if (operation.exists) {
+            assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra operación.', 'already-exists');
+            return operation.data().result;
+        }
+        assert(saleSnapshot.exists && saleSnapshot.data().status === 'Confirmada', 'No se encontró la venta.', 'not-found');
+        const sale = saleSnapshot.data();
+        assert(!sale.account, 'Las ventas en cuenta corriente no admiten devoluciones.', 'failed-precondition');
+        assert(Number.isSafeInteger(sale.ticketNumber) && sale.ticketNumber > 0,
+            'La venta no tiene un número de ticket asignado. Actualiza la sesión.', 'failed-precondition');
+        const returned = { ...(sale.returnedQuantities || {}) };
+        let totalCents = 0;
+        const lines = returns.map((item, index) => {
+            const line = sale.items.find(entry => entry.id === item.id);
+            assert(line && line.type === 'acc', 'Solo se pueden devolver accesorios de la venta.', 'failed-precondition');
+            const already = returned[item.id] || 0;
+            assert(Number.isSafeInteger(already) && already >= 0 && already + item.quantity <= line.quantity,
+                'La cantidad supera las unidades disponibles para devolución.', 'failed-precondition');
+            returned[item.id] = already + item.quantity;
+            const price = money(line.unitPriceCents, 'Precio devuelto');
+            totalCents = money(totalCents + money(price * item.quantity, 'Importe devuelto'), 'Importe devuelto');
+            if (item.restock) {
+                assert(inventory[index].exists && inventory[index].data().type === 'acc', `No existe ${line.name} para reponer.`, 'failed-precondition');
+                const stock = inventory[index].data().stock;
+                assert(Number.isSafeInteger(stock) && stock >= 0 && stock + item.quantity <= 1000000, 'No se puede reponer el stock.', 'failed-precondition');
+            }
+            return { id: item.id, name: line.name, quantity: item.quantity, unitPriceCents: price, restock: item.restock, exchangedQuantity: 0 };
+        });
+        assert(totalCents > 0, 'El importe de la devolución debe ser mayor que cero.', 'failed-precondition');
+        const previous = { cash: 0, transfer: 0, card: 0, ...(sale.refundedSources || {}) };
+        let remaining = totalCents;
+        const refunded = {};
+        for (const [key, paymentKey] of [['cash', 'cashCents'], ['transfer', 'transferCents'], ['card', 'cardBaseCents']]) {
+            const available = money(sale.payment[paymentKey], 'Pago original') - money(previous[key], 'Devoluciones anteriores');
+            assert(available >= 0, 'Los pagos de la venta requieren revisión.', 'failed-precondition');
+            const amount = Math.min(available, remaining);
+            refunded[key] = previous[key] + amount;
+            remaining -= amount;
+        }
+        assert(remaining === 0, 'La devolución supera el importe pagado.', 'failed-precondition');
+        returns.forEach((item, index) => {
+            if (item.restock) tx.update(refs[index], { stock: inventory[index].data().stock + item.quantity, active: true });
+        });
+        tx.update(saleRef, { returnedQuantities: returned, refundedSources: refunded });
+        const result = { creditId: creditRef.id, ticketId, totalCents };
+        tx.create(creditRef, {
+            ...result, ticketNumber: sale.ticketNumber, customerName, reason, items: lines,
+            balanceCents: totalCents, history: [], createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+        });
+        tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
+        return result;
+    });
+});
+
+exports.listReturnCredits = guarded(async request => {
+    const profile = await db.doc(`users/${request.auth.uid}`).get();
+    authorize(request, profile);
+    const snapshot = await db.collection('secure_return_credits').get();
+    const now = Date.now();
+    return snapshot.docs.map(doc => {
+        const credit = doc.data();
+        const date = credit.createdAt?.toDate?.();
+        assert(date && Number.isFinite(date.getTime()), 'La devolución tiene una fecha inválida.', 'failed-precondition');
+        return { ...credit, creditId: doc.id, createdAt: date.toISOString(), alertPeriods: returnAlertPeriods(date.getTime(), now) };
+    });
+});
+
+exports.resolveReturnCredit = guarded(async request => {
+    const data = request.data || {};
+    const operationId = requestId(data.operationId);
+    const creditId = requestId(data.creditId);
+    const expectedBalanceCents = money(data.expectedBalanceCents, 'Saldo esperado');
+    assert(Array.isArray(data.items), 'Indica los productos del cambio.');
+    const items = data.items.length ? normalizeItems(data.items).map((item, index) => ({
+        ...item, expectedPriceCents: money(data.items[index].expectedPriceCents, 'Precio esperado')
+    })) : [];
+    assert(['keep', 'cash', 'transfer'].includes(data.remainder), 'Indica qué hacer con el saldo restante.');
+    const payment = calculatePayment(data.payment);
+    const paidBase = money(payment.cashCents + payment.transferCents + payment.cardBaseCents, 'Pago');
+    const hash = fingerprint({ creditId, expectedBalanceCents, items, remainder: data.remainder, payment: data.payment });
+    const creditRef = db.doc(`secure_return_credits/${creditId}`);
+    const opRef = db.doc(`secure_return_resolution_operations/${request.auth.uid}_${operationId}`);
+    const refs = items.map(item => db.doc(`secure_inventory/${item.id}`));
+    const registerRefs = registers.map(medium => db.doc(`secure_registers/${medium}`));
+    return db.runTransaction(async tx => {
+        const [profile, snapshot, operation, ...all] = await Promise.all([
+            tx.get(db.doc(`users/${request.auth.uid}`)), tx.get(creditRef), tx.get(opRef),
+            ...refs.map(ref => tx.get(ref)), ...registerRefs.map(ref => tx.get(ref))
+        ]);
+        authorize(request, profile, true);
+        if (operation.exists) {
+            assert(operation.data().fingerprint === hash, 'El identificador ya corresponde a otra operación.', 'already-exists');
+            return operation.data().result;
+        }
+        assert(snapshot.exists, 'No se encontró la devolución.', 'not-found');
+        const credit = snapshot.data();
+        const balance = money(credit.balanceCents, 'Saldo a favor');
+        assert(balance > 0 && balance === expectedBalanceCents, 'El saldo cambió. Actualiza la devolución antes de continuar.', 'failed-precondition');
+        const original = credit.items.map(item => ({ ...item }));
+        const inventory = all.slice(0, refs.length);
+        let valueCents = 0;
+        const delivered = items.map((item, index) => {
+            const product = inventory[index].exists ? inventory[index].data() : null;
+            assert(product && product.active === true && Number.isSafeInteger(product.stock) && product.stock >= item.quantity,
+                `Stock insuficiente para ${item.id}.`, 'failed-precondition');
+            const currentPrice = money(product.priceCents, 'Precio actual');
+            assert(currentPrice === item.expectedPriceCents, `El precio de ${product.name} cambió. Actualiza la selección.`, 'failed-precondition');
+            const line = original.find(entry => entry.id === item.id);
+            if (line) assert(Number.isSafeInteger(line.exchangedQuantity) && line.exchangedQuantity >= 0 &&
+                Number.isSafeInteger(line.quantity) && line.exchangedQuantity <= line.quantity,
+            'El detalle de la devolución no es válido.', 'failed-precondition');
+            const sameQty = line ? Math.min(item.quantity, line.quantity - line.exchangedQuantity) : 0;
+            const lineValue = money(sameQty * (line?.unitPriceCents || 0) + (item.quantity - sameQty) * currentPrice, 'Valor del cambio');
+            if (line) line.exchangedQuantity += sameQty;
+            valueCents = money(valueCents + lineValue, 'Valor del cambio');
+            return { id: item.id, name: product.name, quantity: item.quantity, sameQty, currentPriceCents: currentPrice, valueCents: lineValue };
+        });
+        const due = Math.max(0, valueCents - balance);
+        assert(paidBase === due, 'El pago debe cubrir exactamente la diferencia del cambio.', 'failed-precondition');
+        const remaining = Math.max(0, balance - valueCents);
+        assert(items.length || data.remainder !== 'keep', 'Selecciona productos o devuelve el saldo.', 'failed-precondition');
+        const refund = data.remainder === 'keep' ? 0 : remaining;
+        assert(items.length > 0 || refund > 0, 'No hay importe para resolver.', 'failed-precondition');
+        const balances = [payment.cashCents - (data.remainder === 'cash' ? refund : 0),
+            payment.transferCents - (data.remainder === 'transfer' ? refund : 0), payment.cardNetCents];
+        const cash = all.slice(refs.length);
+        const sessions = await Promise.all(cash.map((register, index) => {
+            if (!balances[index]) return null;
+            assert(register.exists && register.data().open === true && typeof register.data().sessionId === 'string',
+                `La caja ${registers[index]} debe estar abierta.`, 'failed-precondition');
+            money(register.data().balanceCents + balances[index], 'Saldo de caja');
+            return tx.get(db.doc(`secure_register_sessions/${register.data().sessionId}`));
+        }));
+        sessions.forEach((session, index) => {
+            if (balances[index]) assert(session?.exists && session.data().open === true &&
+                session.data().balanceCents === cash[index].data().balanceCents,
+            `La sesión de caja ${registers[index]} no está disponible.`, 'failed-precondition');
+        });
+        inventory.forEach((entry, index) => tx.update(refs[index], { stock: entry.data().stock - items[index].quantity }));
+        cash.forEach((entry, index) => {
+            if (!balances[index]) return;
+            const register = entry.data();
+            const balanceCents = register.balanceCents + balances[index];
+            tx.update(registerRefs[index], { balanceCents });
+            tx.update(db.doc(`secure_register_sessions/${register.sessionId}`), { balanceCents });
+            tx.create(db.collection('secure_cash_movements').doc(), {
+                medium: registers[index], amountCents: balances[index], sessionId: register.sessionId,
+                creditId, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+            });
+        });
+        const remainingBalance = remaining - refund;
+        const entry = { items: delivered, valueCents, refundCents: refund, refundMedium: refund ? data.remainder : '',
+            payment, date: new Date().toISOString(), createdBy: request.auth.uid };
+        if (delivered.length) {
+            tx.create(db.collection('secure_return_exchanges').doc(), {
+                creditId, totalCents: money(valueCents + payment.cardTotalCents - payment.cardBaseCents, 'Total del cambio'),
+                items: delivered, payment, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp()
+            });
+        }
+        tx.update(creditRef, { balanceCents: remainingBalance, items: original, history: [...credit.history, entry] });
+        const result = { creditId, balanceCents: remainingBalance, ...entry };
         tx.create(opRef, { fingerprint: hash, result, createdAt: FieldValue.serverTimestamp() });
         return result;
     });

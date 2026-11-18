@@ -117,7 +117,7 @@ test('efectivo y transferencia quedan registrados por separado', () => {
     }
 });
 
-test('no registra cuenta corriente ni plan canje todavía no soportados', () => {
+test('exige cliente para cuenta corriente y bloquea plan canje no soportado', () => {
     const { context } = createApp();
     const messages = [];
     context.showToast = message => messages.push(message);
@@ -125,7 +125,7 @@ test('no registra cuenta corriente ni plan canje todavía no soportados', () => 
     vm.runInContext("posState.ticket = [{id:'A', title:'Producto', price:1000, quantity:1, type:'acc'}]; posState.paymentMethod = methodFixture", context);
     context.processPOSCheckout();
     assert.equal(vm.runInContext('SALES.length', context), 0);
-    assert.match(messages.pop(), /Cuenta corriente todavía no está integrada/);
+    assert.match(messages.pop(), /Indica el nombre del cliente/);
 
     context.methodFixture = 'cash';
     vm.runInContext("posState.paymentMethod = methodFixture", context);
@@ -133,6 +133,25 @@ test('no registra cuenta corriente ni plan canje todavía no soportados', () => 
     context.processPOSCheckout();
     assert.equal(vm.runInContext('SALES.length', context), 0);
     assert.match(messages.pop(), /Plan canje todavía no está integrado/);
+});
+
+test('prepara una venta en cuenta corriente con pago inicial y saldo pendiente', async () => {
+    const { context } = createApp();
+    context.showToast = () => {};
+    context.finalizePendingSale = async () => true;
+    context.document.getElementById('posCustomerName').value = 'Ana';
+    context.document.getElementById('accountCashAmount').value = '200';
+    context.document.getElementById('accountTransferAmount').value = '100';
+    vm.runInContext("posState.ticket = [{id:'A', title:'Producto', price:1000, quantity:1, type:'acc'}]; posState.paymentMethod = 'account'", context);
+    context.updatePOSCardPlanOptions();
+    await context.processPOSCheckout();
+    const sale = vm.runInContext('SALES[0]', context);
+    assert.equal(sale.paymentMethod, 'Cuenta corriente');
+    assert.equal(sale.backendPayment.cashCents, 20000);
+    assert.equal(sale.backendPayment.transferCents, 10000);
+    assert.equal(sale.backendPayment.cardBaseCents, 0);
+    assert.equal(sale.subtotal, 1000);
+    assert.equal(vm.runInContext('CLIENTS[0].accountBalance || 0', context), 0);
 });
 
 test('el backend confirma el ticket y conserva su operación al pasar al historial', async () => {

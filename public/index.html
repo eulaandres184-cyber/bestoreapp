@@ -274,6 +274,32 @@
 
                 </div>
 
+                <div class="custom-card p-4 space-y-3">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-sm">Devoluciones y saldos a favor</h3>
+                            <p class="text-[11px] text-slate-500">Las devoluciones pendientes muestran un aviso cada 48 horas. Solo se admiten accesorios de ventas pagadas.</p>
+                        </div>
+                        <button type="button" onclick="refreshReturnCredits()" class="text-xs font-bold text-emerald-700 underline">Actualizar</button>
+                    </div>
+                    <p id="returnCreditsStatus" class="text-xs text-slate-500" aria-live="polite">Consultando devoluciones…</p>
+                    <button id="retryReturnOperation" type="button" onclick="retryReturnOperation()" class="hidden bg-amber-600 text-white font-bold px-3 py-2 rounded-xl text-xs">Reintentar operación pendiente</button>
+                    <div id="returnCreditsList" class="space-y-3"></div>
+                    <div id="returnResolutionPanel" class="hidden border border-emerald-200 rounded-xl p-3 space-y-2"></div>
+                </div>
+                <div class="custom-card p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-sm">Deudas de clientes</h3>
+                            <p class="text-[11px] text-slate-500">Los precios se actualizan hasta el primer pago; luego quedan fijos. Los cobros requieren la caja correspondiente abierta.</p>
+                        </div>
+                        <button type="button" onclick="refreshCustomerDebts()" class="text-xs font-bold text-emerald-700 underline">Actualizar deudas</button>
+                    </div>
+                    <p id="customerDebtsStatus" class="text-xs text-slate-500" aria-live="polite">Consultando deudas…</p>
+                    <button id="retryCustomerDebtPayment" type="button" onclick="retryCustomerDebtPayment()" class="hidden bg-amber-600 text-white font-bold px-3 py-2 rounded-xl text-xs">Reintentar cobro pendiente</button>
+                    <div id="customerDebtsList" class="space-y-3"></div>
+                </div>
+
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div class="order-2 lg:col-span-5 custom-card p-4">
                     <div class="flex items-center justify-between gap-3">
@@ -460,6 +486,12 @@
                                 <input id="mixedCardAmount" type="number" min="0" step="0.01" oninput="calculatePOSTotals()" placeholder="Tarjeta" aria-label="Importe base en tarjeta" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                                 <p class="col-span-2 text-[10px] text-slate-500">Ingresá los importes sobre el saldo neto. El recargo de tarjeta se suma según el plan seleccionado.</p>
                             </div>
+                            <div id="accountPaymentFields" class="hidden grid grid-cols-2 gap-2 mt-2">
+                                <input id="accountCashAmount" type="number" min="0" step="0.01" oninput="calculatePOSTotals()" placeholder="Pago inicial en efectivo" aria-label="Pago inicial en efectivo" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <input id="accountTransferAmount" type="number" min="0" step="0.01" oninput="calculatePOSTotals()" placeholder="Pago inicial por transferencia" aria-label="Pago inicial por transferencia" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <input id="accountCardAmount" type="number" min="0" step="0.01" oninput="calculatePOSTotals()" placeholder="Pago inicial base en tarjeta" aria-label="Pago inicial base en tarjeta" class="py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <p class="col-span-2 text-[10px] text-slate-500">Opcional. El primer pago fija el precio de toda la deuda.</p>
+                            </div>
                             <select id="cardPlanSelect" onchange="calculatePOSTotals()" class="hidden w-full mt-2 py-2 px-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold"></select>
                             <p id="cardPlanHint" class="text-[10px] text-slate-500 mt-1">Mercado Pago: se suma IVA del 21% sobre la comisión. Verifica la tarifa vigente en tu cuenta.</p>
                         </div>
@@ -485,6 +517,10 @@
                             <div id="posSurchargeRow" class="hidden flex justify-between text-amber-600 font-semibold">
                                 <span>Recargo tarjeta:</span>
                                 <span id="posSurcharge" class="font-mono-num">+$0</span>
+                            </div>
+                            <div id="posAccountBalanceRow" class="hidden flex justify-between text-amber-700 font-semibold">
+                                <span>Saldo pendiente:</span>
+                                <span id="posAccountBalance" class="font-mono-num">$0</span>
                             </div>
                             <div class="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-200">
                                 <span>Total Final a Cobrar:</span>
@@ -648,6 +684,7 @@
                     </h3>
                     <button id="previewMigrationButton" onclick="showLegacyMigrationPreview()" class="hidden bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl text-xs">Revisar datos antiguos</button>
                 </div>
+                <div id="returnEntryPanel" class="hidden custom-card p-4 text-xs space-y-3"></div>
                 <div id="migrationPreview" class="hidden custom-card p-4 text-xs space-y-3" aria-live="polite">
                     <h4 class="font-bold text-slate-900">Vista previa de migración (solo lectura)</h4>
                     <p id="migrationPreviewStatus" class="text-slate-600"></p>

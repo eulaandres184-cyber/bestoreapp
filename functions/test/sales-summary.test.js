@@ -33,6 +33,14 @@ test('una devolución total conserva la operación y deja su importe neto en cer
     assert.deepEqual(result, { todayCount: 1, todayCents: 10000, totalCount: 1, netCents: 0 });
 });
 
+test('el cambio se suma como operación nueva después de descontar el crédito devuelto', () => {
+    const original = sale('one', 10000, '2026-11-17T12:00:00Z', { cash: 10000, transfer: 0, card: 0 });
+    const exchange = { id: 'change', totalCents: 12000, createdAt: { toDate: () => new Date('2026-11-17T13:00:00Z') } };
+    assert.deepEqual(summarizeSales([original], [], now, [exchange]),
+        { todayCount: 2, todayCents: 22000, totalCount: 2, netCents: 12000 });
+    assert.throws(() => summarizeSales([], [], now, [{ ...exchange, totalCents: -1 }]), /Total del cambio/);
+});
+
 test('no inventa importes ni oculta referencias seguras faltantes o datos inválidos', () => {
     assert.throws(() => summarizeSales([], [{ id: 'x', backendTicketId: 'missing' }], now), /No se encontró/);
     assert.throws(() => summarizeSales([sale('x', 100, '2026-11-17T12:00:00Z',

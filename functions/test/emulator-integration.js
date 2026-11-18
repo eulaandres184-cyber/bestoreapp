@@ -159,7 +159,58 @@ async function main() {
     });
     assert.deepEqual(closeResult.differences, { cash: 0, transfer: 0, card: 0 });
     assert.ok(Object.values(await callable('getRegisterStatus', {})).every(register => !register.open));
-    console.log('Emuladores: permisos, Storage, inventario, apertura/cierre conjunto de cajas, vista previa, venta idempotente y devolución verificadas.');
+
+    const accountSale = await callable('recordSale', {
+        operationId: '01234567-1234-4234-8234-012345678905',
+        customerName: 'Cliente de prueba', account: true, items: [{ id: 'ACC-1', quantity: 1 }],
+        payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 }
+    });
+    assert.equal((await db.doc('secure_inventory/ACC-1').get()).data().stock, 0);
+    await callable('saveInventoryItem', { id: 'ACC-1', name: 'Cable', type: 'acc', active: true, stock: 0, priceCents: 150000 });
+    assert.equal((await callable('listCustomerDebts', {}))[0].balanceCents, 150000);
+    await assert.rejects(callable('deleteInventoryItem', { id: 'ACC-1' }), /deudas cuyo precio/);
+    await callable('openAllRegisters', { openingCentsByMedium: { cash: 0, transfer: 0, card: 0 } });
+    const debtPayment = {
+        operationId: '01234567-1234-4234-8234-012345678906', ticketId: accountSale.ticketId, expectedTotalCents: 150000,
+        payment: { cashCents: 30000, transferCents: 0, cardBaseCents: 0 }
+    };
+    assert.equal((await callable('recordCustomerDebtPayment', debtPayment)).balanceCents, 120000);
+    await callable('recordCustomerDebtPayment', debtPayment);
+    assert.equal((await db.doc('secure_registers/cash').get()).data().balanceCents, 30000);
+    await callable('saveInventoryItem', { id: 'ACC-1', name: 'Cable', type: 'acc', active: true, stock: 0, priceCents: 200000 });
+    const [debt] = await callable('listCustomerDebts', {});
+    assert.equal(debt.totalCents, 150000);
+    assert.equal(debt.balanceCents, 120000);
+    assert.equal(debt.payments.length, 1);
+    await callable('closeAllRegisters', { countedCentsByMedium: { cash: 30000, transfer: 0, card: 0 } });
+
+    await callable('saveInventoryItem', { id: 'ACC-2', name: 'Funda', type: 'acc', active: true, stock: 1, priceCents: 50000 });
+    await callable('openAllRegisters', { openingCentsByMedium: { cash: 0, transfer: 0, card: 0 } });
+    const paidSale = await callable('recordSale', {
+        operationId: '01234567-1234-4234-8234-012345678907', items: [{ id: 'ACC-2', quantity: 1 }],
+        payment: { cashCents: 50000, transferCents: 0, cardBaseCents: 0 }
+    });
+    const returned = await callable('createReturnCredit', {
+        operationId: '01234567-1234-4234-8234-012345678908', ticketId: paidSale.ticketId,
+        customerName: 'Cliente de prueba', reason: 'Cambio', items: [{ id: 'ACC-2', quantity: 1, restock: true }]
+    });
+    const credits = await callable('listReturnCredits', {});
+    assert.equal(credits[0].balanceCents, 50000);
+    assert.ok(Number.isFinite(Date.parse(credits[0].createdAt)));
+    await callable('saveInventoryItem', { id: 'ACC-2', name: 'Funda', type: 'acc', active: true, stock: 1, priceCents: 80000 });
+    const resolution = {
+        operationId: '01234567-1234-4234-8234-012345678909', creditId: returned.creditId,
+        expectedBalanceCents: 50000, items: [{ id: 'ACC-2', quantity: 1, expectedPriceCents: 80000 }],
+        remainder: 'keep', payment: { cashCents: 0, transferCents: 0, cardBaseCents: 0 }
+    };
+    assert.equal((await callable('resolveReturnCredit', resolution)).balanceCents, 0);
+    assert.equal((await callable('resolveReturnCredit', resolution)).valueCents, 50000);
+    assert.equal((await db.doc('secure_inventory/ACC-2').get()).data().stock, 0);
+    assert.equal((await db.doc('secure_registers/cash').get()).data().balanceCents, 50000);
+    assert.equal((await callable('listReturnCredits', {}))[0].history.length, 1);
+    await callable('getSalesSummary', {});
+    await callable('closeAllRegisters', { countedCentsByMedium: { cash: 50000, transfer: 0, card: 0 } });
+    console.log('Emuladores: permisos, inventario, cajas, ventas, devoluciones, canjes y cuenta corriente verificadas.');
 }
 
 main().catch(error => {

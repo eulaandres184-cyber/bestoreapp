@@ -147,6 +147,12 @@ let IPHONE_TRADE_IN_RATES = [];
         };
         let secureRegistersLoaded = false;
         let salesSummaryRequest = 0;
+        let customerDebtsRequest = 0;
+        let customerDebtPaymentInProgress = false;
+        let returnCreditsRequest = 0;
+        let returnOperationInProgress = false;
+        let returnEntrySale = null;
+        let returnResolution = null;
         let salesSummaryTimer = null;
         let loadedSalesRevision = 0;
         let editableSale = null;
@@ -311,7 +317,11 @@ let IPHONE_TRADE_IN_RATES = [];
             refreshSalesSummary();
             if (salesSummaryTimer) clearInterval(salesSummaryTimer);
             salesSummaryTimer = setInterval(() => {
-                if (!document.getElementById('view-dashboard').classList.contains('hidden')) refreshSalesSummary();
+                if (!document.getElementById('view-dashboard').classList.contains('hidden')) {
+                    refreshSalesSummary();
+                    if (!document.activeElement?.closest?.('#customerDebtsList form')) refreshCustomerDebts();
+                    if (!returnResolution) refreshReturnCredits();
+                }
             }, 60000);
             renderAccTable();
             renderPhonesTable();
@@ -636,6 +646,8 @@ let IPHONE_TRADE_IN_RATES = [];
             if (tabId === 'dashboard') {
                 renderDashboard();
                 refreshSalesSummary();
+                refreshCustomerDebts();
+                refreshReturnCredits();
             } else if (tabId === 'pos') {
                 renderPOSItemsGrid();
             } else if (tabId === 'categories') {
@@ -653,6 +665,390 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         /* DASHBOARD RENDERING */
+        function customerDebtPendingKey() {
+            const user = firebase.auth().currentUser;
+            if (!user) throw new Error('La sesión venció. Inicia sesión nuevamente.');
+            return `bestore_customer_debt_payment_${user.uid}`;
+        }
+
+        function debtMoney(cents) {
+            return `$${(cents / 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        async function refreshCustomerDebts() {
+            const status = document.getElementById('customerDebtsStatus');
+            const list = document.getElementById('customerDebtsList');
+            if (!status || !list) return;
+            const request = ++customerDebtsRequest;
+            try {
+                const pending = localStorage.getItem(customerDebtPendingKey());
+                document.getElementById('retryCustomerDebtPayment').classList.toggle('hidden', !pending);
+                const debts = await callSecureFunction('listCustomerDebts');
+                if (request !== customerDebtsRequest) return;
+                if (!Array.isArray(debts) || debts.some(debt => !/^[a-f0-9-]{36}$/i.test(debt.ticketId || '') ||
+                    !Number.isSafeInteger(debt.balanceCents) || !Number.isSafeInteger(debt.totalCents) ||
+                    !Number.isSafeInteger(debt.paidCents) || !Array.isArray(debt.items) || !Array.isArray(debt.payments))) {
+                    throw new Error('El backend devolvió una lista de deudas inválida.');
+                }
+                const open = debts.filter(debt => !debt.locked || debt.balanceCents > 0);
+                const total = open.reduce((sum, debt) => sum + debt.balanceCents, 0);
+                if (!Number.isSafeInteger(total)) throw new Error('El total de deudas supera el límite permitido.');
+                status.textContent = `${open.length} deuda(s) pendiente(s): ${debtMoney(total)}.${pending ? ' Hay un cobro pendiente de confirmación; reinténtalo antes de registrar otro.' : ''}`;
+                const plans = Object.entries(CARD_PLANS).map(([id, plan]) => `<option value="${id}">${escapeSupplierHtml(plan.label)}</option>`).join('');
+                list.innerHTML = debts.map(debt => {
+                    const lines = debt.items.map(item => `${item.quantity} × ${escapeSupplierHtml(item.name)}`).join(', ');
+                    const payments = debt.payments.map(entry => {
+                        const date = new Date(entry.date);
+                        const when = Number.isFinite(date.getTime()) ? date.toLocaleString('es-AR') : 'Fecha inválida';
+                        const payment = entry.payment;
+                        const parts = [
+                            payment.cashCents ? `Efectivo ${debtMoney(payment.cashCents)}` : '',
+                            payment.transferCents ? `Transferencia ${debtMoney(payment.transferCents)}` : '',
+                            payment.cardBaseCents ? `Tarjeta ${debtMoney(payment.cardTotalCents)} (${escapeSupplierHtml(payment.cardPlan)})` : ''
+                        ].filter(Boolean).join(' · ');
+                        return `<li>${escapeSupplierHtml(when)}: ${parts}</li>`;
+                    }).join('');
+                    return `<div class="border border-slate-200 rounded-xl p-3 space-y-2 text-xs">
+                        <div class="flex flex-wrap justify-between gap-2"><strong>${escapeSupplierHtml(debt.customerName)} · Ticket #${debt.ticketNumber}</strong>
+                            <strong class="text-amber-700">${debt.balanceCents || !debt.locked ? `Saldo ${debtMoney(debt.balanceCents)}` : 'Cancelada'}</strong></div>
+                        <p>${lines}</p><p>Total base: ${debtMoney(debt.totalCents)} · Pagado: ${debtMoney(debt.paidCents)} · ${debt.locked ? 'Precio fijo' : 'Precio actualizable'}</p>
+                        <p>Fecha de venta: ${debt.createdAt ? escapeSupplierHtml(new Date(debt.createdAt).toLocaleString('es-AR')) : 'No disponible'}</p>
+                        <ul class="text-slate-500 space-y-1">${payments || '<li>Sin pagos registrados.</li>'}</ul>
+                        ${debt.balanceCents > 0 ? `<form onsubmit="submitCustomerDebtPayment(event, '${debt.ticketId}', ${debt.totalCents})" class="flex flex-wrap gap-2 items-center">
+                            <input name="amount" type="number" min="0.01" step="0.01" max="${debt.balanceCents / 100}" required placeholder="Importe base" aria-label="Importe del cobro" oninput="updateDebtCardPreview(this.form)" class="p-2 border rounded-lg">
+                            <select name="medium" aria-label="Medio de pago" onchange="updateDebtCardPreview(this.form)" class="p-2 border rounded-lg"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="card">Tarjeta</option></select>
+                            <select name="plan" aria-label="Plan de tarjeta" onchange="updateDebtCardPreview(this.form)" class="hidden p-2 border rounded-lg">${plans}</select>
+                            <button class="bg-emerald-600 text-white font-bold px-3 py-2 rounded-lg" ${pending ? 'disabled' : ''}>Registrar cobro</button>
+                            <p data-card-preview class="w-full text-[10px] text-slate-500" aria-live="polite"></p>
+                        </form>` : ''}
+                    </div>`;
+                }).join('');
+            } catch (error) {
+                if (request !== customerDebtsRequest) return;
+                console.error('No se pudieron consultar las deudas:', error);
+                status.textContent = error.message || 'No se pudieron consultar las deudas.';
+                list.innerHTML = '';
+            }
+        }
+
+        function updateDebtCardPreview(form) {
+            const card = form.elements.medium.value === 'card';
+            form.elements.plan.classList.toggle('hidden', !card);
+            const preview = form.querySelector('[data-card-preview]');
+            const amount = Number(form.elements.amount.value);
+            if (!card || !Number.isFinite(amount) || amount <= 0) {
+                preview.textContent = '';
+                return;
+            }
+            const charges = calculateCardCharges(amount, form.elements.plan.value);
+            preview.textContent = `Total a cobrar en tarjeta: $${(amount + charges.total).toLocaleString('es-AR')}. El saldo se reduce por el importe base.`;
+        }
+
+        function returnPendingKey() {
+            const user = firebase.auth().currentUser;
+            if (!user) throw new Error('La sesión venció. Inicia sesión nuevamente.');
+            return `bestore_return_operation_${user.uid}`;
+        }
+
+        async function openReturnEntry(saleId) {
+            if (!requireAdmin()) return;
+            const sale = SALES.find(entry => entry.id === saleId);
+            if (!sale?.backendTicketId) return;
+            const panel = document.getElementById('returnEntryPanel');
+            try {
+                if (localStorage.getItem(returnPendingKey())) throw new Error('Hay una operación de devolución pendiente. Reinténtala desde el dashboard.');
+                const result = await callSecureFunction('getReturnableSale', { ticketId: sale.backendTicketId });
+                if (!result || !Array.isArray(result.items)) throw new Error('El backend devolvió una venta inválida.');
+                if (!result.items.length) throw new Error('La venta no tiene accesorios disponibles para devolver.');
+                returnEntrySale = result;
+                const knownName = result.customerName && result.customerName.toLowerCase() !== 'consumidor final' ? result.customerName : '';
+                panel.innerHTML = `<form onsubmit="submitReturnEntry(event)" class="space-y-2">
+                    <h4 class="font-bold">Registrar devolución · Ticket #${result.ticketNumber}</h4>
+                    <p>Selecciona cantidades y si cada artículo vuelve al stock. Los celulares no se pueden devolver.</p>
+                    <input name="customer" required maxlength="120" value="${escapeSupplierHtml(knownName)}" placeholder="Nombre del cliente" aria-label="Nombre del cliente" class="p-2 border rounded-lg">
+                    <input name="reason" required maxlength="500" placeholder="Motivo de devolución" aria-label="Motivo de devolución" class="p-2 border rounded-lg">
+                    <div class="space-y-2">${result.items.map((item, index) => `<div class="flex flex-wrap gap-2 items-center">
+                        <span>${escapeSupplierHtml(item.name)} · ${debtMoney(item.unitPriceCents)} · disponibles ${item.available}</span>
+                        <input data-return-quantity="${index}" type="number" min="0" max="${item.available}" step="1" value="0" aria-label="Cantidad a devolver" class="w-20 p-2 border rounded-lg">
+                        <label><input data-return-restock="${index}" type="checkbox"> Reponer en stock</label>
+                    </div>`).join('')}</div>
+                    <button class="bg-emerald-600 text-white font-bold px-3 py-2 rounded-lg">Registrar saldo a favor</button>
+                    <button type="button" onclick="closeReturnEntry()" class="p-2">Cancelar</button>
+                </form>`;
+                panel.classList.remove('hidden');
+                panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (error) {
+                console.error('No se pudo consultar la venta para devolución:', error);
+                showToast(error.message || 'No se pudo consultar la venta.');
+            }
+        }
+
+        function closeReturnEntry() {
+            returnEntrySale = null;
+            document.getElementById('returnEntryPanel').classList.add('hidden');
+        }
+
+        async function submitReturnEntry(event) {
+            event.preventDefault();
+            if (!returnEntrySale || returnOperationInProgress) return;
+            const form = event.currentTarget;
+            try {
+                const items = returnEntrySale.items.map((item, index) => ({
+                    id: item.id, quantity: Number(form.querySelector(`[data-return-quantity="${index}"]`).value),
+                    restock: form.querySelector(`[data-return-restock="${index}"]`).checked
+                })).filter(item => item.quantity > 0);
+                if (!items.length || items.some(item => !Number.isSafeInteger(item.quantity))) throw new Error('Indica cantidades válidas para devolver.');
+                await queueReturnOperation('createReturnCredit', {
+                    operationId: createOperationId(), ticketId: returnEntrySale.ticketId, items,
+                    customerName: form.elements.customer.value.trim(), reason: form.elements.reason.value.trim()
+                });
+            } catch (error) {
+                console.error('No se pudo preparar la devolución:', error);
+                showToast(error.message || 'No se pudo preparar la devolución.');
+            }
+        }
+
+        async function refreshReturnCredits() {
+            const status = document.getElementById('returnCreditsStatus');
+            const list = document.getElementById('returnCreditsList');
+            if (!status || !list) return;
+            const request = ++returnCreditsRequest;
+            try {
+                const pending = localStorage.getItem(returnPendingKey());
+                document.getElementById('retryReturnOperation').classList.toggle('hidden', !pending || !isAdmin());
+                const credits = await callSecureFunction('listReturnCredits');
+                if (request !== returnCreditsRequest) return;
+                if (!Array.isArray(credits) || credits.some(credit => !/^[a-f0-9-]{36}$/i.test(credit.creditId || '') ||
+                    !Number.isSafeInteger(credit.balanceCents) || credit.balanceCents < 0 ||
+                    !Array.isArray(credit.items) || !Array.isArray(credit.history) || !Number.isFinite(Date.parse(credit.createdAt)) ||
+                    !Number.isSafeInteger(credit.alertPeriods) || credit.alertPeriods < 0)) {
+                    throw new Error('El backend devolvió una lista de devoluciones inválida.');
+                }
+                const open = credits.filter(credit => credit.balanceCents > 0);
+                const alerted = open.filter(credit => credit.alertPeriods > 0);
+                status.textContent = `${open.length} pendiente(s); ${alerted.length} con alerta de 48 horas.${pending ? ' Hay una operación pendiente de confirmación.' : ''}`;
+                credits.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+                list.innerHTML = credits.map(credit => {
+                    const cycles = credit.alertPeriods;
+                    const alert = credit.balanceCents > 0 && cycles ? `<strong class="text-red-700">Alerta: ${cycles} período(s) de 48 h sin resolver</strong>` : '';
+                    const history = credit.history.map(entry => `<li>${escapeSupplierHtml(new Date(entry.date).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }))}: ${
+                        entry.items.length ? `Cambio ${entry.items.map(item => `${item.quantity} × ${escapeSupplierHtml(item.name)}`).join(', ')} (${debtMoney(entry.valueCents)})` : ''}${
+                        entry.refundCents ? ` · Reintegro ${debtMoney(entry.refundCents)} (${entry.refundMedium === 'cash' ? 'efectivo' : 'transferencia'})` : ''}${
+                        entry.payment.cashCents + entry.payment.transferCents + entry.payment.cardBaseCents ? ` · Diferencia cobrada: ${debtMoney(entry.payment.cashCents + entry.payment.transferCents + entry.payment.cardTotalCents)}` : ''}</li>`).join('');
+                    return `<div class="border rounded-xl p-3 text-xs space-y-2">
+                        <div class="flex flex-wrap justify-between gap-2"><strong>${escapeSupplierHtml(credit.customerName)} · Ticket #${credit.ticketNumber}</strong>
+                        <strong>${credit.balanceCents ? `Saldo a favor ${debtMoney(credit.balanceCents)}` : 'Resuelta'}</strong></div>
+                        <p>Devolución: ${escapeSupplierHtml(new Date(credit.createdAt).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }))} · Motivo: ${escapeSupplierHtml(credit.reason)}</p>
+                        <p>${credit.items.map(item => `${item.quantity} × ${escapeSupplierHtml(item.name)}`).join(', ')}</p>
+                        ${alert}<ul class="text-slate-500 space-y-1">${history}</ul>
+                        ${isAdmin() && credit.balanceCents > 0 ? `<button type="button" onclick="openReturnResolution('${credit.creditId}')" class="bg-emerald-600 text-white font-bold px-3 py-2 rounded-lg" ${pending ? 'disabled' : ''}>Gestionar saldo</button>` : ''}
+                    </div>`;
+                }).join('');
+                returnCredits = credits;
+            } catch (error) {
+                if (request !== returnCreditsRequest) return;
+                console.error('No se pudieron consultar las devoluciones:', error);
+                status.textContent = error.message || 'No se pudieron consultar las devoluciones.';
+                list.innerHTML = '';
+            }
+        }
+
+        let returnCredits = [];
+        async function openReturnResolution(creditId) {
+            if (!requireAdmin()) return;
+            try {
+                if (localStorage.getItem(returnPendingKey())) throw new Error('Hay una operación pendiente. Reinténtala primero.');
+                const credit = returnCredits.find(entry => entry.creditId === creditId);
+                if (!credit || credit.balanceCents <= 0) throw new Error('Actualiza la lista de devoluciones.');
+                const inventory = (await callSecureFunction('listInventory')).filter(item => item.active && item.stock > 0);
+                returnResolution = { credit, inventory };
+                const panel = document.getElementById('returnResolutionPanel');
+                const plans = Object.entries(CARD_PLANS).map(([id, plan]) => `<option value="${id}">${escapeSupplierHtml(plan.label)}</option>`).join('');
+                panel.innerHTML = `<form onsubmit="submitReturnResolution(event)" oninput="updateReturnResolutionPreview(this)" class="space-y-2 text-xs">
+                    <h4 class="font-bold">Gestionar saldo de ${escapeSupplierHtml(credit.customerName)}: ${debtMoney(credit.balanceCents)}</h4>
+                    <p>Selecciona productos o deja las cantidades en cero para devolver el dinero. El mismo accesorio se cambia al precio de devolución.</p>
+                    <div class="max-h-60 overflow-y-auto space-y-1">${inventory.map((item, index) => `<label class="flex items-center gap-2">
+                        <input data-exchange-quantity="${index}" type="number" min="0" max="${item.stock}" step="1" value="0" class="w-20 p-2 border rounded-lg">
+                        ${escapeSupplierHtml(item.name)} · ${debtMoney(item.priceCents)} · stock ${item.stock}
+                    </label>`).join('') || 'No hay productos disponibles.'}</div>
+                    <p data-return-preview class="font-bold"></p>
+                    <label>Si queda saldo: <select name="remainder" class="p-2 border rounded-lg"><option value="keep">Mantener saldo a favor</option><option value="cash">Devolver en efectivo</option><option value="transfer">Devolver por transferencia</option></select></label>
+                    <p>Si hay diferencia a cobrar, ingresa los importes base:</p>
+                    <input name="cash" type="number" min="0" step="0.01" value="0" aria-label="Diferencia en efectivo" class="w-36 p-2 border rounded-lg">
+                    <input name="transfer" type="number" min="0" step="0.01" value="0" aria-label="Diferencia por transferencia" class="w-36 p-2 border rounded-lg">
+                    <input name="card" type="number" min="0" step="0.01" value="0" aria-label="Diferencia base en tarjeta" class="w-36 p-2 border rounded-lg">
+                    <select name="plan" class="p-2 border rounded-lg" aria-label="Plan de tarjeta">${plans}</select>
+                    <button class="bg-emerald-600 text-white font-bold px-3 py-2 rounded-lg">Confirmar gestión</button>
+                    <button type="button" onclick="closeReturnResolution()" class="p-2">Cancelar</button>
+                </form>`;
+                panel.classList.remove('hidden');
+                updateReturnResolutionPreview(panel.querySelector('form'));
+                panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (error) {
+                console.error('No se pudo preparar el cambio:', error);
+                showToast(error.message || 'No se pudo preparar el cambio.');
+            }
+        }
+
+        function closeReturnResolution() {
+            returnResolution = null;
+            document.getElementById('returnResolutionPanel').classList.add('hidden');
+        }
+
+        function selectedReturnItems(form) {
+            return returnResolution.inventory.map((item, index) => ({
+                id: item.id, quantity: Number(form.querySelector(`[data-exchange-quantity="${index}"]`).value),
+                expectedPriceCents: item.priceCents
+            })).filter(item => item.quantity > 0);
+        }
+
+        function updateReturnResolutionPreview(form) {
+            if (!returnResolution) return;
+            const items = selectedReturnItems(form);
+            const value = items.reduce((sum, item) => {
+                const original = returnResolution.credit.items.find(line => line.id === item.id);
+                const same = original ? Math.min(item.quantity, original.quantity - original.exchangedQuantity) : 0;
+                return sum + same * (original?.unitPriceCents || 0) + (item.quantity - same) * item.expectedPriceCents;
+            }, 0);
+            const balance = returnResolution.credit.balanceCents;
+            const card = Number(form.elements.card.value) || 0;
+            const cardTotal = card > 0 ? card + calculateCardCharges(card, form.elements.plan.value).total : 0;
+            form.querySelector('[data-return-preview]').textContent = `Valor del cambio: ${debtMoney(value)} · Diferencia base: ${debtMoney(Math.max(0, value - balance))} · Saldo restante: ${debtMoney(Math.max(0, balance - value))}${card ? ` · Tarjeta a cobrar: $${cardTotal.toLocaleString('es-AR')}` : ''}`;
+        }
+
+        async function submitReturnResolution(event) {
+            event.preventDefault();
+            if (!returnResolution || returnOperationInProgress) return;
+            try {
+                const form = event.currentTarget;
+                const items = selectedReturnItems(form);
+                if (items.some(item => !Number.isSafeInteger(item.quantity))) throw new Error('Indica cantidades válidas.');
+                const amounts = ['cash', 'transfer', 'card'].map(key => {
+                    const amount = Number(form.elements[key].value);
+                    const cents = Math.round(amount * 100);
+                    if (!Number.isFinite(amount) || amount < 0 || !Number.isSafeInteger(cents)) throw new Error('Ingresa pagos válidos.');
+                    return cents;
+                });
+                await queueReturnOperation('resolveReturnCredit', {
+                    operationId: createOperationId(), creditId: returnResolution.credit.creditId,
+                    expectedBalanceCents: returnResolution.credit.balanceCents, items, remainder: form.elements.remainder.value,
+                    payment: { cashCents: amounts[0], transferCents: amounts[1], cardBaseCents: amounts[2],
+                        ...(amounts[2] ? { cardPlan: form.elements.plan.value } : {}) }
+                });
+            } catch (error) {
+                console.error('No se pudo preparar la gestión:', error);
+                showToast(error.message || 'No se pudo preparar la gestión.');
+            }
+        }
+
+        async function queueReturnOperation(name, payload) {
+            const key = returnPendingKey();
+            if (localStorage.getItem(key)) throw new Error('Hay una operación pendiente. Reinténtala primero.');
+            localStorage.setItem(key, JSON.stringify({ name, payload }));
+            await retryReturnOperation();
+        }
+
+        async function retryReturnOperation() {
+            if (!requireAdmin() || returnOperationInProgress) return;
+            returnOperationInProgress = true;
+            try {
+                const key = returnPendingKey();
+                const pending = JSON.parse(localStorage.getItem(key));
+                if (!pending || !['createReturnCredit', 'resolveReturnCredit'].includes(pending.name) ||
+                    !/^[a-f0-9-]{36}$/i.test(pending.payload?.operationId || '')) throw new Error('La operación pendiente es inválida. Contacta a un administrador.');
+                await callSecureFunction(pending.name, pending.payload);
+                localStorage.removeItem(key);
+                closeReturnEntry();
+                closeReturnResolution();
+                showToast('Devolución gestionada correctamente.');
+                try {
+                    await Promise.all([refreshSecureRegisters(), refreshSecureInventory()]);
+                } catch (error) {
+                    console.error('No se pudo actualizar caja o inventario:', error);
+                    showToast('Operación registrada; no se pudo actualizar la caja o el inventario visible.');
+                }
+                renderSalesTable();
+                renderDashboard();
+                renderAccTable();
+                renderPhonesTable();
+                renderPOSItemsGrid();
+                refreshSalesSummary();
+            } catch (error) {
+                console.error('No se pudo confirmar la operación de devolución:', error);
+                const code = String(error.code || '').replace(/^functions\//, '');
+                if (['failed-precondition', 'invalid-argument', 'not-found'].includes(code)) {
+                    localStorage.removeItem(returnPendingKey());
+                    closeReturnResolution();
+                }
+                showToast(error.message || 'No se confirmó la operación. Reinténtala desde el dashboard.');
+            } finally {
+                returnOperationInProgress = false;
+                await refreshReturnCredits();
+            }
+        }
+
+        async function submitCustomerDebtPayment(event, ticketId, expectedTotalCents) {
+            event.preventDefault();
+            if (customerDebtPaymentInProgress) return;
+            try {
+                const key = customerDebtPendingKey();
+                if (localStorage.getItem(key)) throw new Error('Hay un cobro pendiente de confirmación. Reinténtalo primero.');
+                const form = event.currentTarget;
+                const amount = Number(form.elements.amount.value);
+                const cents = Math.round(amount * 100);
+                if (!Number.isFinite(amount) || !Number.isSafeInteger(cents) || cents <= 0) throw new Error('Ingresa un importe válido.');
+                const medium = form.elements.medium.value;
+                if (!['cash', 'transfer', 'card'].includes(medium)) throw new Error('Selecciona un medio de pago válido.');
+                const payment = {
+                    cashCents: medium === 'cash' ? cents : 0,
+                    transferCents: medium === 'transfer' ? cents : 0,
+                    cardBaseCents: medium === 'card' ? cents : 0,
+                    ...(medium === 'card' ? { cardPlan: form.elements.plan.value } : {})
+                };
+                const pending = { operationId: createOperationId(), ticketId, expectedTotalCents, payment };
+                localStorage.setItem(key, JSON.stringify(pending));
+                await retryCustomerDebtPayment();
+            } catch (error) {
+                console.error('No se pudo preparar el cobro:', error);
+                showToast(error.message || 'No se pudo preparar el cobro.');
+            }
+        }
+
+        async function retryCustomerDebtPayment() {
+            if (customerDebtPaymentInProgress) return;
+            customerDebtPaymentInProgress = true;
+            try {
+                const key = customerDebtPendingKey();
+                const stored = localStorage.getItem(key);
+                if (!stored) throw new Error('No hay un cobro pendiente para reintentar.');
+                const pending = JSON.parse(stored);
+                if (!pending || !/^[a-f0-9-]{36}$/i.test(pending.operationId || '') ||
+                    !/^[a-f0-9-]{36}$/i.test(pending.ticketId || '') || !Number.isSafeInteger(pending.expectedTotalCents) ||
+                    !pending.payment || !['cashCents', 'transferCents', 'cardBaseCents'].every(key => Number.isSafeInteger(pending.payment[key]) && pending.payment[key] >= 0)) {
+                    throw new Error('El cobro pendiente local es inválido. Contacta a un administrador.');
+                }
+                await callSecureFunction('recordCustomerDebtPayment', pending);
+                localStorage.removeItem(key);
+                showToast('Cobro registrado en la caja correspondiente.');
+                try {
+                    await refreshSecureRegisters();
+                } catch (error) {
+                    console.error('El cobro se registró, pero no se pudo actualizar la caja:', error);
+                    showToast('Cobro registrado; no se pudo actualizar el saldo visible de la caja.');
+                }
+            } catch (error) {
+                console.error('No se pudo confirmar el cobro:', error);
+                const code = String(error.code || '').replace(/^functions\//, '');
+                if (['failed-precondition', 'invalid-argument', 'not-found'].includes(code)) {
+                    localStorage.removeItem(customerDebtPendingKey());
+                }
+                showToast(error.message || 'No se confirmó el cobro. Reinténtalo antes de registrar otro.');
+            } finally {
+                customerDebtPaymentInProgress = false;
+                await refreshCustomerDebts();
+            }
+        }
+
         function renderDashboard() {
             let inStockPhones = PHONES.filter(p => p.status === 'En Stock');
             const featuredPhones = inStockPhones
@@ -832,8 +1228,7 @@ let IPHONE_TRADE_IN_RATES = [];
             hint.textContent = 'Para todos los productos: precio en cuotas = efectivo / (1 - costo total), redondeado a $100. Mercado Pago incluye IVA sobre la comisión.';
         }
 
-        function calculateCardCharges(cardAmount) {
-            const planId = document.getElementById('cardPlanSelect').value;
+        function calculateCardCharges(cardAmount, planId = document.getElementById('cardPlanSelect').value) {
             const plan = CARD_PLANS[planId];
             if (!plan) throw new Error('Selecciona un plan de tarjeta válido.');
             const commissionRate = plan.provider === 'mp'
@@ -1321,8 +1716,9 @@ let IPHONE_TRADE_IN_RATES = [];
                     ? 'py-2 px-2 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-700 font-bold text-center transition'
                     : 'py-2 px-2 rounded-xl bg-slate-100 text-slate-600 border border-transparent font-medium text-center transition';
             });
-            document.getElementById('cardPlanSelect').classList.toggle('hidden', method !== 'card' && method !== 'mixed');
+            document.getElementById('cardPlanSelect').classList.toggle('hidden', method !== 'card' && method !== 'mixed' && method !== 'account');
             document.getElementById('mixedPaymentFields').classList.toggle('hidden', method !== 'mixed');
+            document.getElementById('accountPaymentFields').classList.toggle('hidden', method !== 'account');
 
             if (posState.ticket.length && !pendingSaleId) persistTicketDraft();
             calculatePOSTotals();
@@ -1375,8 +1771,9 @@ let IPHONE_TRADE_IN_RATES = [];
             const subtotal = posState.ticket.reduce((sum, item) => sum + Math.round(item.price * 100) * item.quantity, 0) / 100;
             let canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
-            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : Math.max(0, subtotal - canjeVal);
-            const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
+            const accountCard = parseFloat(document.getElementById('accountCardAmount').value) || 0;
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'account' ? accountCard : Math.max(0, subtotal - canjeVal);
+            const cardCharges = ['mixed', 'card', 'account'].includes(posState.paymentMethod) ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             document.getElementById('posSurchargeRow').classList.toggle('hidden', surcharge === 0);
             document.getElementById('posSurcharge').textContent = `+$${surcharge.toLocaleString('es-AR')} (costo cuotas)`;
@@ -1384,6 +1781,10 @@ let IPHONE_TRADE_IN_RATES = [];
 
             document.getElementById('posSubtotal').textContent = `$${subtotal.toLocaleString('es-AR')}`;
             document.getElementById('posTotal').textContent = `$${finalTotal.toLocaleString('es-AR')}`;
+            const accountPaid = ['accountCashAmount', 'accountTransferAmount', 'accountCardAmount']
+                .reduce((sum, id) => sum + (parseFloat(document.getElementById(id).value) || 0), 0);
+            document.getElementById('posAccountBalanceRow').classList.toggle('hidden', posState.paymentMethod !== 'account');
+            document.getElementById('posAccountBalance').textContent = `$${Math.max(0, subtotal - accountPaid).toLocaleString('es-AR')}`;
         }
 
         function createOperationId() {
@@ -1469,12 +1870,11 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
             if (!persistTicketDraft()) return;
-            if (posState.paymentMethod === 'account') {
-                showToast('Cuenta corriente todavía no está integrada al backend seguro. No se registró la venta.');
+            const customerName = document.getElementById('posCustomerName').value.trim() || 'Consumidor Final';
+            if (posState.paymentMethod === 'account' && customerName.toLowerCase() === 'consumidor final') {
+                showToast('Indica el nombre del cliente para registrar la deuda.');
                 return;
             }
-
-            const customerName = document.getElementById('posCustomerName').value.trim() || 'Consumidor Final';
             const customerPhone = document.getElementById('posCustomerPhone').value.trim() || '-';
             const canjeVal = parseFloat(document.getElementById('posCanjeDeduction').value) || 0;
             if (!Number.isFinite(canjeVal) || canjeVal < 0) {
@@ -1490,6 +1890,8 @@ let IPHONE_TRADE_IN_RATES = [];
             const mixedCash = parseFloat(document.getElementById('mixedCashAmount').value) || 0;
             const mixedTransfer = parseFloat(document.getElementById('mixedTransferAmount').value) || 0;
             const mixedCard = parseFloat(document.getElementById('mixedCardAmount').value) || 0;
+            const accountAmounts = ['accountCashAmount', 'accountTransferAmount', 'accountCardAmount']
+                .map(id => document.getElementById(id).value === '' ? 0 : Number(document.getElementById(id).value));
             const netTotal = Math.max(0, subtotal - canjeVal);
             if (posState.paymentMethod === 'mixed' && [mixedCash, mixedTransfer, mixedCard].some(amount => !Number.isFinite(amount) || amount < 0)) {
                 showToast('Ingresa importes válidos para cada medio de pago.');
@@ -1499,13 +1901,18 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('El pago mixto debe completar el importe a cobrar.');
                 return;
             }
-            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'card' ? netTotal : 0;
-            const cardCharges = posState.paymentMethod === 'mixed' || posState.paymentMethod === 'card' ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
+            if (posState.paymentMethod === 'account' && (accountAmounts.some(value => !Number.isFinite(value) || value < 0) ||
+                accountAmounts.reduce((sum, value) => sum + Math.round(value * 100), 0) >= Math.round(netTotal * 100))) {
+                showToast('Ingresa pagos iniciales válidos menores al total de la venta.');
+                return;
+            }
+            const cardBase = posState.paymentMethod === 'mixed' ? mixedCard : posState.paymentMethod === 'account' ? accountAmounts[2] : posState.paymentMethod === 'card' ? netTotal : 0;
+            const cardCharges = ['mixed', 'card', 'account'].includes(posState.paymentMethod) ? calculateCardCharges(cardBase) : { commission: 0, vat: 0, total: 0 };
             const surcharge = cardCharges.total;
             let total = netTotal + surcharge;
             const backendPayment = {
-                cashCents: Math.round((posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'cash' ? total : 0) * 100),
-                transferCents: Math.round((posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'transfer' ? total : 0) * 100),
+                cashCents: Math.round((posState.paymentMethod === 'mixed' ? mixedCash : posState.paymentMethod === 'account' ? accountAmounts[0] : posState.paymentMethod === 'cash' ? total : 0) * 100),
+                transferCents: Math.round((posState.paymentMethod === 'mixed' ? mixedTransfer : posState.paymentMethod === 'account' ? accountAmounts[1] : posState.paymentMethod === 'transfer' ? total : 0) * 100),
                 cardBaseCents: Math.round(cardBase * 100),
                 ...(cardBase > 0 ? { cardPlan: document.getElementById('cardPlanSelect').value } : {})
             };
@@ -1551,7 +1958,6 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             if (client) {
                 client.purchaseCount = (client.purchaseCount || 0) + 1;
-                if (posState.paymentMethod === 'account') client.accountBalance = (client.accountBalance || 0) + total;
             }
             lastCreatedSale = saleRecord;
             pendingSaleId = saleRecord.id;
@@ -1821,6 +2227,7 @@ let IPHONE_TRADE_IN_RATES = [];
                             <i class="fa-solid fa-receipt"></i>
                         </button>
                         ${isAdmin() && sale.status === 'Confirmada' && sale.backendTicketId ? `<button onclick="openEditSale('${sale.id}')" class="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs" title="Corregir venta"><i class="fa-solid fa-pen"></i></button>` : ''}
+                        ${isAdmin() && sale.status === 'Confirmada' && sale.backendTicketId && sale.paymentMethod !== 'Cuenta corriente' ? `<button onclick="openReturnEntry('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Registrar devolución"><i class="fa-solid fa-rotate-left"></i></button>` : ''}
                         ${isAdmin() && sale.status !== 'Anulada' && !sale.backendTicketId && !sale.backendSubmissionStarted ? `<button onclick="cancelSale('${sale.id}')" class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs" title="Anular venta"><i class="fa-solid fa-ban"></i></button>` : ''}
                         ${isAdmin() && !sale.backendTicketId ? `<button onclick="deleteSale('${sale.id}')" class="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs" title="Eliminar venta"><i class="fa-solid fa-trash"></i></button>` : ''}
                     </td>
@@ -2057,6 +2464,10 @@ let IPHONE_TRADE_IN_RATES = [];
             if (sale.surcharge > 0) totalsHTML += `<div class="text-amber-700">Recargo tarjeta: +$${sale.surcharge.toLocaleString('es-AR')}</div>`;
             if (sale.canjeDeduction > 0) totalsHTML += `<div class="text-amber-700">Plan Canje: -$${sale.canjeDeduction.toLocaleString('es-AR')}</div>`;
             totalsHTML += `<div class="text-sm font-black pt-1 border-t border-slate-300">TOTAL: $${sale.total.toLocaleString('es-AR')}</div>`;
+            if (sale.paymentMethod === 'Cuenta corriente' && sale.backendPayment) {
+                const paid = (sale.backendPayment.cashCents + sale.backendPayment.transferCents + sale.backendPayment.cardBaseCents) / 100;
+                totalsHTML += `<div>Pago inicial (base): $${paid.toLocaleString('es-AR')}</div><div>Saldo inicial: $${Math.max(0, sale.subtotal - paid).toLocaleString('es-AR')}</div><div>Consulta el saldo actualizado en Deudas de clientes.</div>`;
+            }
 
             document.getElementById('receiptTotals').innerHTML = totalsHTML;
             const pending = sale.status === 'Pendiente de emisión';
@@ -2104,7 +2515,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 operationId: sale.backendOperationId,
                 items: sale.items.map(item => ({ id: item.id, quantity: item.quantity, ...(item.quoteId ? { quoteId: item.quoteId } : {}) })),
                 customerName: sale.customerName,
-                payment: sale.backendPayment
+                payment: sale.backendPayment,
+                ...(sale.paymentMethod === 'Cuenta corriente' ? { account: true } : {})
             };
             let backendCommitted = false;
             sale.backendSubmissionStarted = true;
@@ -2209,6 +2621,9 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('mixedCashAmount').value = '';
             document.getElementById('mixedTransferAmount').value = '';
             document.getElementById('mixedCardAmount').value = '';
+            document.getElementById('accountCashAmount').value = '';
+            document.getElementById('accountTransferAmount').value = '';
+            document.getElementById('accountCardAmount').value = '';
             posState.phoneConditionFilter = 'ALL';
             posOperationInProgress = false;
             const checkoutButton = document.getElementById('posCheckoutButton');
@@ -2217,6 +2632,7 @@ let IPHONE_TRADE_IN_RATES = [];
             renderPOSTicket();
             renderDashboard();
             refreshSalesSummary();
+            refreshCustomerDebts();
             renderAccTable();
             renderPhonesTable();
             renderPOSItemsGrid();
@@ -2240,7 +2656,6 @@ let IPHONE_TRADE_IN_RATES = [];
             const client = CLIENTS.find(item => item.name.toLowerCase() === sale.customerName.toLowerCase());
             if (client) {
                 client.purchaseCount = Math.max(0, (client.purchaseCount || 1) - 1);
-                if (sale.paymentMethod === 'Cuenta corriente') client.accountBalance = Math.max(0, (client.accountBalance || 0) - sale.total);
             }
             SALES = SALES.filter(item => item.id !== sale.id);
             pendingSaleId = null;
@@ -2326,6 +2741,12 @@ let IPHONE_TRADE_IN_RATES = [];
                 if (sale.surcharge > 0) addLine(`Recargo tarjeta: +${moneyText(sale.surcharge)}`);
                 if (sale.canjeDeduction > 0) addLine(`Plan Canje: -${moneyText(sale.canjeDeduction)}`);
                 addLine(`TOTAL: ${moneyText(sale.total)}`, true);
+                if (sale.paymentMethod === 'Cuenta corriente' && sale.backendPayment) {
+                    const paid = (sale.backendPayment.cashCents + sale.backendPayment.transferCents + sale.backendPayment.cardBaseCents) / 100;
+                    addLine(`Pago inicial (base): ${moneyText(paid)}`);
+                    addLine(`Saldo inicial: ${moneyText(Math.max(0, sale.subtotal - paid))}`);
+                    addLine('Consultar saldo actualizado en Deudas de clientes.');
+                }
                 y += 4;
                 addLine('¡Muchas gracias por tu compra en BE STORE!');
                 pdf.save(`Ticket-BS-${getTicketNumber(sale)}.pdf`);
@@ -2557,7 +2978,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 const contact = whatsappNumber
                     ? `<a href="https://wa.me/${whatsappNumber}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline" title="Enviar mensaje por WhatsApp"><i class="fa-brands fa-whatsapp"></i>${client.phone}</a>`
                     : '-';
-                return `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${contact}${client.email ? `<span class="block text-[10px] text-slate-500">${client.email}</span>` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Cuenta corriente: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td><td class="p-3 text-center"><button onclick="editClient('${client.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar cliente"><i class="fa-solid fa-pen"></i></button></td></tr>`;
+                return `<tr class="border-b border-slate-100"><td class="p-3 font-semibold">${client.name}</td><td class="p-3">${contact}${client.email ? `<span class="block text-[10px] text-slate-500">${client.email}</span>` : ''}</td><td class="p-3">${client.purchaseCount || 0}${client.accountBalance > 0 ? `<span class="block text-[10px] font-mono-num text-amber-700">Saldo anterior sin conciliar: $${client.accountBalance.toLocaleString('es-AR')}</span>` : ''}</td><td class="p-3 text-center"><button onclick="editClient('${client.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs" title="Editar cliente"><i class="fa-solid fa-pen"></i></button></td></tr>`;
             }).join('') || '<tr><td colspan="4" class="p-6 text-center text-slate-400">No hay clientes registrados.</td></tr>';
         }
 

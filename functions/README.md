@@ -14,7 +14,8 @@ controlado de los clientes anteriores.
 - `deleteInventoryItem`: elimina un producto del inventario seguro y del
   catálogo en una transacción, con auditoría. No elimina ni modifica las ventas
   que ya contienen una copia del nombre y precio vendidos; una corrección
-  explícita de la venta se registra mediante `editSale`.
+  explícita de la venta se registra mediante `editSale`. Se bloquea la
+  eliminación si el producto figura en una deuda que aún actualiza precios.
 - `openAllRegisters` y `closeAllRegisters`: un administrador abre las tres
   cajas `cash`, `transfer` y `card` en una transacción, con saldo inicial
   independiente para cada una. El cierre también es conjunto y registra el
@@ -36,6 +37,24 @@ controlado de los clientes anteriores.
   `operationId` UUID y la misma solicitud; el precio de la venta confirmada
   queda guardado en el ticket. También se conserva el nombre del usuario que
   confirmó la venta; los tickets anteriores sin ese dato muestran «No registrado».
+- Cuenta corriente: `recordSale` admite una venta con cliente identificado y
+  saldo pendiente, descontando stock sin movimientos de caja salvo los pagos
+  iniciales. `listCustomerDebts` muestra cada deuda y su historial de cobros;
+  mientras no haya pagos calcula el saldo con los precios vigentes del
+  inventario seguro. `recordCustomerDebtPayment` fija el precio total al primer
+  pago y registra cada cobro con fecha y movimientos en las cajas
+  correspondientes. Los pagos posteriores no cambian ese precio y pueden ser
+  parciales o cancelar el saldo. Tarjeta aplica el mismo plan y redondeo que
+  las ventas; el saldo se reduce por el importe base, no por el recargo.
+  Los cobros se reintentan con el mismo `operationId`, y requieren confirmar el
+  total vigente y tener abiertas las cajas y sesiones utilizadas. El navegador
+  conserva un cobro de resultado incierto para reintentarlo; no se debe borrar
+  ese dato antes de confirmar el resultado. Las ventas en cuenta corriente no
+  admiten edición ni devolución desde los flujos existentes. Los saldos locales
+  anteriores no se migran ni se incluyen en las deudas seguras.
+  Los indicadores de ventas conservan el importe original de la venta; el
+  saldo actualizado y los pagos se consultan en el panel de deudas, no en
+  esos indicadores.
 - `previewLegacyMigration`: un administrador consulta una vista previa del
   inventario y los tickets de `app_state/main`, con incidencias para conciliar.
   Los celulares en USD que ya coinciden en nombre, estado, stock y precio con
@@ -56,7 +75,9 @@ controlado de los clientes anteriores.
   del historial sin duplicar las ventas seguras; las anuladas y pendientes no
   se cuentan. Una venta devuelta sigue contando como operación. El neto conserva
   los recargos de tarjeta que no se reintegran. Las devoluciones anteriores no
-  registradas en el backend seguro no pueden descontarse automáticamente.
+  registradas en el backend seguro no pueden descontarse automáticamente. Los
+  saldos a favor se descuentan al registrar la devolución y los cambios se
+  suman al concretarse.
 - `setUserRole`: un administrador con claim válida sincroniza el perfil y la
   custom claim del usuario, revoca sus tokens y registra el cambio. El primer
   administrador todavía se debe habilitar con `set-role.js`.
@@ -79,7 +100,27 @@ controlado de los clientes anteriores.
   efectivo se reintegra en efectivo, la transferencia en transferencia y el
   monto pagado con tarjeta se reintegra en efectivo o transferencia. Cada
   artículo puede reponerse o quedar fuera del stock. Se requiere saldo y caja
-  abierta en cada medio de reintegro.
+  abierta en cada medio de reintegro. No admite celulares ni ventas en cuenta
+  corriente.
+- Devoluciones con saldo a favor: desde el historial, un administrador
+  selecciona accesorios y registra motivo, cliente, cantidades y reposición
+  opcional. `createReturnCredit` registra el saldo por el precio base vendido,
+  sin modificar las cajas, y guarda la fecha y hora del servidor. Se solicita
+  nombre si la venta era a consumidor final. El dashboard muestra pendientes,
+  resueltas e historial; calcula avisos a las 48 horas y cada 48 horas
+  adicionales desde la devolución, mientras quede saldo. Los avisos son
+  visibles en el dashboard, no son notificaciones externas.
+- `resolveReturnCredit` permite canjear varios productos, reintegrar dinero o
+  combinar un cambio de menor valor con reintegro o saldo restante. Cada
+  unidad del mismo accesorio sustituye una devuelta por su precio original;
+  otras unidades o productos se valoran al precio vigente. Si el cambio supera
+  el saldo se cobra la diferencia por efectivo, transferencia y/o tarjeta.
+  El movimiento exige caja y sesión abiertas; un reintegro exige saldo
+  suficiente. Las existencias, saldo y cajas se actualizan en una transacción,
+  con reintentos idempotentes. Se conserva localmente la operación incierta
+  para reintentarla; no borrar los datos del navegador antes de confirmar.
+  Los cambios registrados suman una operación y su valor al resumen de ventas,
+  pero quedan en el historial de la devolución, no como tickets editables.
 - Los importes se expresan como enteros en **centavos de peso argentino**. La
   caja de tarjeta registra el neto estimado después de comisiones.
 
@@ -88,9 +129,9 @@ actuales; las funciones usan el SDK administrativo. Sus datos son independientes
 de `app_state/main`: actualizar el catálogo o vender desde el flujo anterior no
 actualiza el inventario seguro, ni viceversa.
 
-El POS conectado admite efectivo, transferencia, tarjeta y pagos mixtos, con
-precios y stock recalculados en el backend. Cuenta corriente y plan canje se
-bloquean explícitamente hasta integrar sus reglas. La venta se confirma en el
+El POS conectado admite efectivo, transferencia, tarjeta, pagos mixtos y cuenta
+corriente, con precios y stock calculados en el backend. Plan canje se bloquea
+explícitamente hasta integrar sus reglas. La venta se confirma en el
 backend al imprimir o enviar el comprobante; se usa el mismo `operationId` en
 cada reintento y no se permite cancelar mientras el resultado de una llamada
 pueda ser incierto. Eliminar un producto del catálogo no elimina sus líneas de
