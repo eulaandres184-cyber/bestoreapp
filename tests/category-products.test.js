@@ -103,7 +103,7 @@ test('eliminar producto lo quita del inventario local sin alterar ventas guardad
     const storage = new Map();
     context.requireAdmin = () => true;
     context.confirmProductDeletion = async () => true;
-    context.callSecureFunction = async (name, data) => { deletion = { name, data }; };
+    context.callSecureFunction = async (name, data) => { deletion = { name, data }; return { id: data.id }; };
     context.localStorage = { setItem: (key, value) => storage.set(key, value) };
     context.showToast = () => {};
     for (const name of ['renderDashboard', 'renderAccTable', 'renderPOSCategories',
@@ -118,4 +118,66 @@ test('eliminar producto lo quita del inventario local sin alterar ventas guardad
     assert.equal(vm.runInContext(`SALES[0].items[0].title`, context), 'Soporte');
     assert.equal(vm.runInContext(`SALES[0].items[0].price`, context), 6500);
     assert.equal(JSON.parse(storage.get('bestore_internal_products')).some(item => item.id === 'ACC-1'), false);
+});
+
+test('una categoría abierta se actualiza al eliminar un producto', async () => {
+    const { context, elements } = createApp('admin');
+    context.confirmProductDeletion = async () => true;
+    context.callSecureFunction = async (_, data) => ({ id: data.id });
+    context.localStorage = { setItem() {} };
+    context.showToast = () => {};
+    for (const name of ['renderDashboard', 'renderAccTable', 'renderPOSCategories',
+        'renderPOSItemsGrid', 'renderCategoriesPage']) context[name] = () => {};
+    context.showCategoryProducts('soportes');
+    await context.deleteProduct('ACC-1');
+    assert.equal(elements.get('categoryProductsTitle').textContent, 'Soportes (0)');
+    assert.equal(elements.get('categoryProductsList').children[0].textContent, 'No hay productos en esta categoría.');
+});
+
+test('un error interno no elimina el producto y explica que no se pudo confirmar', async () => {
+    const { context } = createApp('admin');
+    const messages = [];
+    context.confirmProductDeletion = async () => true;
+    context.callSecureFunction = async () => { throw Object.assign(new Error('INTERNAL'), { code: 'functions/internal' }); };
+    context.showToast = message => messages.push(message);
+    await context.deleteProduct('ACC-1');
+    assert.equal(vm.runInContext(`PRODUCTS.some(item => item.id === 'ACC-1')`, context), true);
+    assert.match(messages[0], /No se pudo confirmar la eliminación/);
+});
+
+test('si falla el almacenamiento local, muestra el resultado confirmado y actualiza la pantalla', async () => {
+    const { context } = createApp('admin');
+    const messages = [];
+    let rendered = 0;
+    context.confirmProductDeletion = async () => true;
+    context.callSecureFunction = async (_, data) => ({ id: data.id });
+    context.localStorage = { setItem() { throw new Error('sin espacio'); } };
+    context.showToast = message => messages.push(message);
+    context.renderAccTable = () => { rendered++; };
+    for (const name of ['renderDashboard', 'renderPOSCategories', 'renderPOSItemsGrid', 'renderCategoriesPage']) context[name] = () => {};
+    await context.deleteProduct('ACC-1');
+    assert.equal(vm.runInContext(`PRODUCTS.some(item => item.id === 'ACC-1')`, context), false);
+    assert.equal(rendered, 1);
+    assert.match(messages[0], /eliminado en Firebase.*almacenamiento/);
+});
+
+test('no envía dos eliminaciones simultáneas', async () => {
+    const { context } = createApp('admin');
+    let finish;
+    let calls = 0;
+    context.confirmProductDeletion = async () => true;
+    context.callSecureFunction = async (_, data) => {
+        calls++;
+        await new Promise(resolve => { finish = resolve; });
+        return { id: data.id };
+    };
+    context.localStorage = { setItem() {} };
+    context.showToast = () => {};
+    for (const name of ['renderDashboard', 'renderAccTable', 'renderPOSCategories', 'renderPOSItemsGrid', 'renderCategoriesPage']) context[name] = () => {};
+    const first = context.deleteProduct('ACC-1');
+    await Promise.resolve();
+    await context.deleteProduct('ACC-2');
+    assert.equal(calls, 1);
+    finish();
+    await first;
 });

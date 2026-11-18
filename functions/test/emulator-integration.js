@@ -210,6 +210,17 @@ async function main() {
     assert.equal((await callable('listReturnCredits', {}))[0].history.length, 1);
     await callable('getSalesSummary', {});
     await callable('closeAllRegisters', { countedCentsByMedium: { cash: 50000, transfer: 0, card: 0 } });
+
+    await db.doc('app_state/main').update({ products: [
+        { id: 'ACC-1', title: 'Cable', stock: 0 }, { id: 'ACC-2', title: 'Funda', stock: 0 }
+    ] });
+    const beforeDeletionSale = (await db.doc(`secure_sales/${paidSale.ticketId}`).get()).data();
+    assert.equal((await callable('deleteInventoryItem', { id: 'ACC-2' })).id, 'ACC-2');
+    assert.equal((await db.doc('secure_inventory/ACC-2').get()).exists, false);
+    assert.equal((await db.doc('app_state/main').get()).data().products.some(item => item.id === 'ACC-2'), false);
+    assert.deepEqual((await db.doc(`secure_sales/${paidSale.ticketId}`).get()).data(), beforeDeletionSale);
+    assert.equal((await callable('deleteInventoryItem', { id: 'ACC-1' })).id, 'ACC-1');
+    assert.equal((await callable('listCustomerDebts', {}))[0].balanceCents, 120000);
     console.log('Emuladores: permisos, inventario, cajas, ventas, devoluciones, canjes y cuenta corriente verificadas.');
 }
 

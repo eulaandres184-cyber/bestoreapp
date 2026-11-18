@@ -160,6 +160,7 @@ let IPHONE_TRADE_IN_RATES = [];
         let editSaleSubmitting = false;
         let dailyDollarRate = 0;
         let openCategoryId = null;
+        let productDeletionInProgress = false;
 
         let posState = {
             ticket: [],
@@ -3780,27 +3781,45 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         async function deleteProduct(id) {
-            if (!requireAdmin()) return;
+            if (!requireAdmin() || productDeletionInProgress) return;
             const product = PRODUCTS.find(item => item.id === id);
             if (!product) return;
-            document.getElementById('deleteProductConfirmName').textContent = product.title;
-            if (!await confirmProductDeletion()) return;
-
+            productDeletionInProgress = true;
             try {
-                await callSecureFunction('deleteInventoryItem', { id: product.id });
+                document.getElementById('deleteProductConfirmName').textContent = product.title;
+                if (!await confirmProductDeletion()) return;
+                try {
+                    const result = await callSecureFunction('deleteInventoryItem', { id: product.id });
+                    if (!result || result.id !== product.id) {
+                        throw new Error('El servidor devolvió una respuesta inválida. Vuelve a iniciar sesión para comprobar el inventario.');
+                    }
+                } catch (error) {
+                    console.error('No se pudo confirmar la eliminación del artículo:', error);
+                    const code = String(error.code || '').replace(/^functions\//, '');
+                    showToast(code === 'internal' || code === 'unavailable'
+                        ? 'No se pudo confirmar la eliminación. Verifica la conexión y que la función de eliminación esté publicada; vuelve a iniciar sesión para consultar el inventario.'
+                        : error.message || 'No se pudo eliminar el producto.');
+                    return;
+                }
                 PRODUCTS = PRODUCTS.filter(item => item.id !== id);
-                localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
-            } catch (error) {
-                console.error('No se pudo eliminar el artículo del inventario seguro:', error);
-                showToast(error.message || 'No se pudo eliminar el producto.');
-                return;
+                let storageUpdated = true;
+                try {
+                    localStorage.setItem('bestore_internal_products', JSON.stringify(PRODUCTS));
+                } catch (error) {
+                    console.error('El producto se eliminó, pero no se pudo actualizar el almacenamiento local:', error);
+                    storageUpdated = false;
+                }
+                renderDashboard();
+                renderAccTable();
+                renderPOSCategories();
+                renderPOSItemsGrid();
+                renderCategoriesPage();
+                if (openCategoryId) showCategoryProducts(openCategoryId);
+                showToast(storageUpdated ? `${product.title} fue eliminado del inventario.`
+                    : 'Producto eliminado en Firebase, pero no se pudo actualizar el almacenamiento de este dispositivo.');
+            } finally {
+                productDeletionInProgress = false;
             }
-            renderDashboard();
-            renderAccTable();
-            renderPOSCategories();
-            renderPOSItemsGrid();
-            renderCategoriesPage();
-            showToast(`${product.title} fue eliminado del inventario.`);
         }
 
         /* MODAL CRUD OPERATIONS FOR PHONES */
