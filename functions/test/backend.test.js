@@ -344,6 +344,11 @@ test('eliminar un producto no borra el detalle vendido y permite corregir su pre
         reason: 'Se ingresó otro precio en la venta', items: [{ id: 'A', quantity: 1, priceCents: 50000 }],
         payment: { cashCents: 50000, transferCents: 0, cardBaseCents: 0 }
     };
+    await assert.rejects(api.editSale(request('admin', 'admin', {
+        ...edit,
+        items: [{ id: 'A', quantity: 2, priceCents: 50000 }],
+        payment: { cashCents: 100000, transferCents: 0, cardBaseCents: 0 }
+    })), error => error.code === 'failed-precondition');
     await api.editSale(request('admin', 'admin', edit));
     assert.equal(data.has('secure_inventory/A'), false);
     assert.equal(data.get(`secure_sales/${recorded.ticketId}`).items[0].unitPriceCents, 50000);

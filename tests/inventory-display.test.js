@@ -69,3 +69,34 @@ test('la tabla vacía usa la cantidad de columnas correspondiente al rol', () =>
         assert.match(elements.get('accTableBody').innerHTML, new RegExp(`colspan="${colspan}"`));
     }
 });
+
+test('el punto de venta ordena precios de menor a mayor en todas las categorías y búsquedas', () => {
+    const { context, elements } = createApp('seller');
+    const grid = context.document.getElementById('posItemsGrid');
+    grid.querySelectorAll = () => [];
+    vm.runInContext(`
+        PRODUCTS = [
+            { id: 'A', title: 'Cable caro', brand: 'Marca', category: 'audio', stock: 1, price: 300, status: 'Activo' },
+            { id: 'B', title: 'Cable barato', brand: 'Marca', category: 'audio', stock: 1, price: 50, status: 'Activo' },
+            { id: 'C', title: 'Funda', brand: 'Marca', category: 'fundas', stock: 1, price: 150, status: 'Activo' },
+            { id: 'D', title: 'Sin stock', brand: 'Marca', category: 'audio', stock: 0, price: 1, status: 'Anulado' }
+        ];
+        PHONES = [
+            { id: 'P1', brand: 'Phone', model: 'Caro', storage: '128', condition: 'Nuevo', status: 'En Stock', price: 250, imei: '1' },
+            { id: 'P2', brand: 'Phone', model: 'Barato', storage: '128', condition: 'Usado', status: 'En Stock', price: 100, imei: '2' }
+        ];
+    `, context);
+    const ids = () => [...grid.innerHTML.matchAll(/addPOSItem\('([^']+)'/g)].map(match => match[1]);
+    context.renderPOSItemsGrid();
+    assert.deepEqual(ids(), ['B', 'P2', 'C', 'P1', 'A']);
+    vm.runInContext("posState.selectedCategory = 'audio'", context);
+    context.renderPOSItemsGrid();
+    assert.deepEqual(ids(), ['B', 'A']);
+    vm.runInContext("posState.selectedCategory = 'celulares'", context);
+    context.renderPOSItemsGrid();
+    assert.deepEqual(ids(), ['P2', 'P1']);
+    vm.runInContext("posState.selectedCategory = 'ALL'", context);
+    context.document.getElementById('posSearchInput').value = 'cable';
+    context.renderPOSItemsGrid();
+    assert.deepEqual(ids(), ['B', 'A']);
+});

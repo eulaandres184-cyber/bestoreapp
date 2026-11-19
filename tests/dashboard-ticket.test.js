@@ -160,6 +160,7 @@ test('el dashboard muestra referencias numéricas de ticket sin alterar el ID in
 
 test('el comprobante y el PDF conservan el número del dashboard y el cliente por defecto', () => {
     const { context, elements } = createApp();
+    const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
     const lines = [];
     let filename;
     context.window.jspdf = { jsPDF: class {
@@ -183,6 +184,8 @@ test('el comprobante y el PDF conservan el número del dashboard y el cliente po
     assert.match(elements.get('receiptCustomerInfo').innerHTML, /Cliente:<\/strong> Consumidor Final/);
     assert.match(elements.get('receiptCustomerInfo').innerHTML, /Vendedor:<\/strong> Ana &lt;V&gt;/);
     assert.ok(lines.includes('Ticket-BS-0023'));
+    assert.match(html, /id="receiptModal"[\s\S]*?Teléfono: 2302217040/);
+    assert.ok(lines.includes('Teléfono de BE STORE: 2302217040'));
     assert.ok(lines.includes('Cliente: Consumidor Final'));
     assert.ok(lines.includes('Vendedor: Ana <V>'));
     assert.ok(lines.includes('1x Cable - $1.200'));
@@ -212,6 +215,24 @@ test('el comprobante anterior consulta el creador real y no el usuario de la ses
     await new Promise(resolve => setImmediate(resolve));
     assert.match(elements.get('receiptCustomerInfo').innerHTML, /Vendedor:<\/strong> Ana &lt;V&gt;/);
     assert.equal(vm.runInContext('SALES[0].sellerName', context), 'No registrado');
+});
+
+test('la corrección conserva el artículo histórico eliminado del catálogo', () => {
+    const { context, elements } = createApp();
+    const controls = {
+        '.edit-item': { value: '', addEventListener() {} },
+        '.edit-price': { value: '' },
+        '.edit-quantity': { value: '' },
+        'button': { addEventListener() {} }
+    };
+    const row = { className: '', innerHTML: '', querySelector: selector => controls[selector] };
+    context.document.createElement = () => row;
+    elements.set('editSaleLines', { appendChild(value) { assert.equal(value, row); } });
+    vm.runInContext('editableSale = {}; editSaleInventory = []', context);
+    context.addEditSaleLine({ id: 'A', name: 'Cable <original>', quantity: 1, unitPriceCents: 50000 });
+    assert.match(row.innerHTML, /value="A">Cable &lt;original&gt; \(A\) · Eliminado del catálogo/);
+    assert.equal(controls['.edit-item'].value, 'A');
+    assert.equal(controls['.edit-price'].value, 500);
 });
 
 test('el formato conserva cuatro dígitos y crece a partir de 10000', () => {

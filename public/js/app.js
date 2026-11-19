@@ -1559,6 +1559,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 return;
             }
 
+            itemsList.sort((first, second) => first.price - second.price);
+
             grid.innerHTML = itemsList.map(item => `
                 <div onclick="addPOSItem('${item.id}', '${item.type}')" class="pos-product-card custom-card custom-card-hover p-3 flex flex-col cursor-pointer bg-white">
                     <div class="shrink-0">
@@ -2315,7 +2317,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('editSaleModal').classList.remove('hidden');
             } catch (error) {
                 console.error('No se pudo cargar la venta para corregir:', error);
-                showToast(error.message || 'No se pudo cargar la venta.');
+                const code = String(error.code || '').replace(/^functions\//, '');
+                showToast(['internal', 'not-found', 'unavailable'].includes(code) && (!error.message || /^(internal|not found|unavailable)$/i.test(error.message.trim()))
+                    ? 'No se pudo cargar la venta. Verifica la conexión y que las funciones de corrección estén publicadas.'
+                    : error.message || 'No se pudo cargar la venta.');
             }
         }
 
@@ -2327,7 +2332,10 @@ let IPHONE_TRADE_IN_RATES = [];
             if (!editableSale || editableSale.pending) return;
             const row = document.createElement('div');
             row.className = 'grid grid-cols-1 sm:grid-cols-12 gap-2';
-            const options = editSaleInventory.map(entry => `<option value="${escapeReceiptText(entry.id)}">${escapeReceiptText(entry.name)} (${escapeReceiptText(entry.id)})</option>`).join('');
+            const historicalOption = item && !editSaleInventory.some(entry => entry.id === item.id)
+                ? `<option value="${escapeReceiptText(item.id)}">${escapeReceiptText(item.name)} (${escapeReceiptText(item.id)}) · Eliminado del catálogo</option>`
+                : '';
+            const options = historicalOption + editSaleInventory.map(entry => `<option value="${escapeReceiptText(entry.id)}">${escapeReceiptText(entry.name)} (${escapeReceiptText(entry.id)})</option>`).join('');
             row.innerHTML = `<select class="edit-item sm:col-span-6 border rounded-lg p-2 text-xs">${options}</select>
                 <input class="edit-quantity sm:col-span-2 border rounded-lg p-2 text-xs" type="number" min="1" step="1" aria-label="Cantidad">
                 <input class="edit-price sm:col-span-3 border rounded-lg p-2 text-xs" type="number" min="0" step="0.01" aria-label="Precio unitario">
@@ -2772,6 +2780,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 pdf.setFontSize(11);
                 addLine('BE STORE - COMPROBANTE DE VENTA', true);
                 addLine('Mobile & Tech Accessories | Instagram: @bestoreok');
+                addLine('Teléfono de BE STORE: 2302217040');
                 addLine(`Fecha: ${sale.date}`);
                 addLine(getTicketLabel(sale), true);
                 addLine(`Cliente: ${getSaleCustomerName(sale)}`);

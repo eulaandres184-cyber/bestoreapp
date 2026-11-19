@@ -932,6 +932,8 @@ exports.editSale = guarded(async request => {
                 const type = oldItem.type || previousLegacyItem?.type;
                 assert(typeof name === 'string' && name.length > 0 && ['acc', 'phone'].includes(type),
                     `No se puede corregir el artículo eliminado ${id} sin su detalle histórico.`, 'failed-precondition');
+                assert(requested.quantity <= (oldQuantities[id] || 0),
+                    `No se puede aumentar la cantidad del artículo eliminado ${id}.`, 'failed-precondition');
                 catalog[id] = {
                     id, name, type, active: true, stock: requested.quantity,
                     priceCents: requested.priceCents
