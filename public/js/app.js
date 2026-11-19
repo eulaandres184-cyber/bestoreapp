@@ -857,7 +857,10 @@ let IPHONE_TRADE_IN_RATES = [];
             } catch (error) {
                 if (request !== returnCreditsRequest) return;
                 console.error('No se pudieron consultar las devoluciones:', error);
-                status.textContent = error.message || 'No se pudieron consultar las devoluciones.';
+                const code = String(error.code || '').replace(/^functions\//, '');
+                status.textContent = ['internal', 'not-found', 'unavailable'].includes(code) && (!error.message || /^(internal|not found|unavailable)$/i.test(error.message.trim()))
+                    ? 'No se pudieron consultar las devoluciones. Verifica la conexión y que la función esté publicada.'
+                    : error.message || 'No se pudieron consultar las devoluciones.';
                 list.innerHTML = '';
             }
         }

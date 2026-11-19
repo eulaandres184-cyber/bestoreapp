@@ -55,6 +55,13 @@ test('el dashboard presenta acceso destacado a venta y tarjetas de cajas seguras
     assert.match(html, /id="view-dashboard"[\s\S]*?Cotizar Canje[\s\S]*?Consultar tabla actualizada de iPhone/);
 });
 
+test('devoluciones y deudas se muestran en dos tarjetas responsivas del dashboard', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+    assert.match(html, /class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4"/);
+    assert.match(html, /class="grid grid-cols-1 lg:grid-cols-2 gap-4">[\s\S]*?id="returnCreditsCard" class="custom-card p-4 space-y-3"[\s\S]*?Devoluciones y saldos a favor[\s\S]*?id="returnCreditsList"[\s\S]*?id="customerDebtsCard" class="custom-card p-4 space-y-3"[\s\S]*?Deudas de clientes[\s\S]*?id="customerDebtsList"/);
+    assert.doesNotMatch(html, /<dialog id="(?:returnCreditsPanel|customerDebtsPanel)"/);
+});
+
 test('el resumen de celulares muestra los dos equipos disponibles de mayor valor', () => {
     const { context, elements } = createApp();
     context.renderCashRegister = () => {};
