@@ -190,6 +190,30 @@ test('el comprobante y el PDF conservan el número del dashboard y el cliente po
     assert.equal(filename, 'Ticket-BS-0023.pdf');
 });
 
+test('el comprobante anterior consulta el creador real y no el usuario de la sesión', async () => {
+    const { context, elements } = createApp();
+    const id = '01234567-1234-4234-8234-012345678901';
+    let resolveSeller;
+    context.callSecureFunction = (name, payload) => {
+        assert.equal(name, 'getSaleSeller');
+        assert.equal(payload.ticketId, id);
+        return new Promise(resolve => { resolveSeller = resolve; });
+    };
+    vm.runInContext(`currentUserProfile = { nick: 'Otro usuario' }; SALES = [{
+        id: '${id}', backendTicketId: '${id}', ticketNumber: 23, total: 1200, subtotal: 1200,
+        customerName: '', customerPhone: '-', sellerName: 'No registrado',
+        items: [{quantity: 1, title: 'Cable', price: 1200}],
+        paymentMethod: 'Efectivo', date: '17/11/26', status: 'Confirmada'
+    }]`, context);
+    elements.set('receiptModal', { classList: { add() {}, remove() {}, contains() { return false; } } });
+    context.reprintReceipt(id);
+    assert.match(elements.get('receiptCustomerInfo').innerHTML, /Vendedor:<\/strong> No registrado/);
+    resolveSeller({ sellerName: 'Ana <V>' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(elements.get('receiptCustomerInfo').innerHTML, /Vendedor:<\/strong> Ana &lt;V&gt;/);
+    assert.equal(vm.runInContext('SALES[0].sellerName', context), 'No registrado');
+});
+
 test('el formato conserva cuatro dígitos y crece a partir de 10000', () => {
     const { context } = createApp();
     const filenames = [];

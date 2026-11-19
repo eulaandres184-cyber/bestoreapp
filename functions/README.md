@@ -36,7 +36,10 @@ controlado de los clientes anteriores.
   UUID. La cotización se usa una sola vez. Cada reintento debe utilizar el mismo
   `operationId` UUID y la misma solicitud; el precio de la venta confirmada
   queda guardado en el ticket. También se conserva el nombre del usuario que
-  confirmó la venta; los tickets anteriores sin ese dato muestran «No registrado».
+  confirmó la venta.
+- `getSaleSeller`: para un comprobante seguro anterior sin nombre guardado,
+  consulta el perfil del usuario que registró la venta. Muestra su nick actual,
+  que puede diferir del que tenía al vender; no modifica el ticket histórico.
 - Cuenta corriente: `recordSale` admite una venta con cliente identificado y
   saldo pendiente, descontando stock sin movimientos de caja salvo los pagos
   iniciales. `listCustomerDebts` muestra cada deuda y su historial de cobros;

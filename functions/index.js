@@ -838,6 +838,25 @@ exports.recordSale = guarded(async request => {
     });
 });
 
+exports.getSaleSeller = guarded(async request => {
+    const ticketId = requestId(request.data?.ticketId);
+    const [profile, sale] = await Promise.all([
+        db.doc(`users/${request.auth.uid}`).get(), db.doc(`secure_sales/${ticketId}`).get()
+    ]);
+    authorize(request, profile);
+    assert(sale.exists && sale.data().status === 'Confirmada', 'La venta no existe.', 'not-found');
+    const data = sale.data();
+    const savedName = typeof data.sellerName === 'string' ? data.sellerName.trim() : '';
+    if (savedName && savedName !== 'No registrado') return { sellerName: savedName };
+    assert(typeof data.createdBy === 'string' && data.createdBy.length > 0 &&
+        data.createdBy.length <= 128 && !data.createdBy.includes('/'),
+    'La venta no tiene un vendedor identificable.', 'failed-precondition');
+    const seller = await db.doc(`users/${data.createdBy}`).get();
+    const sellerName = seller.exists && typeof seller.data().nick === 'string' ? seller.data().nick.trim() : '';
+    assert(sellerName && sellerName.length <= 120, 'No se encontró el perfil del vendedor de esta venta.', 'failed-precondition');
+    return { sellerName };
+});
+
 exports.getEditableSale = guarded(async request => {
     const ticketId = requestId(request.data?.ticketId);
     const [profile, sale] = await Promise.all([

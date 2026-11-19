@@ -102,6 +102,20 @@ function fixture(options = {}) {
 const operationId = 'c0ffcccc-2222-4333-8444-555555555555';
 const payload = { operationId, items: [{ id: 'A', quantity: 1 }], payment: { cashCents: 100000, transferCents: 0, cardBaseCents: 0 } };
 
+test('consulta el vendedor histórico desde el creador de la venta para usuarios autorizados', async () => {
+    const { data, api, request } = fixture();
+    const ticketId = '01234567-1234-4234-8234-012345678901';
+    data.set(`secure_sales/${ticketId}`, { status: 'Confirmada', createdBy: 'seller' });
+    const result = await api.getSaleSeller(request('seller', 'seller', { ticketId }));
+    assert.equal(result.sellerName, 'Vendedor');
+    data.get(`secure_sales/${ticketId}`).sellerName = 'Nombre original';
+    assert.equal((await api.getSaleSeller(request('admin', 'admin', { ticketId }))).sellerName, 'Nombre original');
+    await assert.rejects(api.getSaleSeller(request('seller', 'admin', { ticketId })), error => error.code === 'permission-denied');
+    delete data.get(`secure_sales/${ticketId}`).sellerName;
+    data.delete('users/seller');
+    await assert.rejects(api.getSaleSeller(request('admin', 'admin', { ticketId })), error => error.code === 'failed-precondition');
+});
+
 test('cuenta corriente actualiza el precio hasta el primer pago y registra cobros idempotentes', async () => {
     const { data, api, request } = fixture();
     data.set('secure_registers/cash', { open: false, balanceCents: 0 });

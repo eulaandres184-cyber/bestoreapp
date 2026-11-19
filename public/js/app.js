@@ -174,6 +174,8 @@ let IPHONE_TRADE_IN_RATES = [];
         let saleFinalizationInProgress = false;
         let passwordChangeInProgress = false;
         let passwordResultPreviousFocus = null;
+        const receiptSellerNames = new Map();
+        const receiptSellerRequests = new Map();
         let posQuoteInProgress = false;
         let activeTradeInValuation = 0;
         let activeTradeInValuationUsd = 0;
@@ -386,6 +388,8 @@ let IPHONE_TRADE_IN_RATES = [];
             await firebase.auth().signOut();
             if (systemClockTimer) clearInterval(systemClockTimer);
             systemClockTimer = null;
+            receiptSellerNames.clear();
+            receiptSellerRequests.clear();
             currentUserProfile = null;
             posState.ticket = [];
             pendingSaleId = null;
@@ -1173,8 +1177,34 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function getSaleSellerName(sale) {
-            return typeof sale.sellerName === 'string' && sale.sellerName.trim()
-                ? sale.sellerName.trim() : 'No registrado';
+            const name = typeof sale.sellerName === 'string' ? sale.sellerName.trim() : '';
+            return (name && name !== 'No registrado' ? name : receiptSellerNames.get(sale.backendTicketId)) || 'No registrado';
+        }
+
+        async function recoverReceiptSeller(sale) {
+            const ticketId = sale.backendTicketId;
+            if (!ticketId || sale.status !== 'Confirmada' || getSaleSellerName(sale) !== 'No registrado') return;
+            if (!receiptSellerRequests.has(ticketId)) {
+                receiptSellerRequests.set(ticketId, callSecureFunction('getSaleSeller', { ticketId }));
+            }
+            const request = receiptSellerRequests.get(ticketId);
+            try {
+                const result = await request;
+                if (receiptSellerRequests.get(ticketId) !== request) return;
+                if (typeof result?.sellerName !== 'string' || !result.sellerName.trim()) {
+                    throw new Error('El backend devolvió un vendedor inválido.');
+                }
+                receiptSellerNames.set(ticketId, result.sellerName.trim());
+                if (lastCreatedSale === sale && !document.getElementById('receiptModal').classList.contains('hidden')) {
+                    renderReceiptCustomerInfo(sale);
+                }
+            } catch (error) {
+                if (receiptSellerRequests.get(ticketId) !== request) return;
+                console.error('No se pudo consultar el vendedor del comprobante:', error);
+                if (lastCreatedSale === sale) showToast(error.message || 'No se pudo consultar el vendedor del comprobante.');
+            } finally {
+                if (receiptSellerRequests.get(ticketId) === request) receiptSellerRequests.delete(ticketId);
+            }
         }
 
         function escapeReceiptText(value) {
@@ -2446,9 +2476,7 @@ let IPHONE_TRADE_IN_RATES = [];
             }
         }
 
-        function openReceiptModal(sale) {
-            lastCreatedSale = sale;
-            document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | ${getTicketLabel(sale)}`;
+        function renderReceiptCustomerInfo(sale) {
             document.getElementById('receiptCustomerInfo').innerHTML = `
                 <div><strong>Cliente:</strong> ${getSaleCustomerName(sale)}</div>
                 <div><strong>Vendedor:</strong> ${escapeReceiptText(getSaleSellerName(sale))}</div>
@@ -2457,6 +2485,12 @@ let IPHONE_TRADE_IN_RATES = [];
                 ${sale.cardPlan ? `<div><strong>Plan de tarjeta:</strong> ${sale.cardPlan}</div>` : ''}
                 ${sale.paymentVersion === 2 && sale.paymentMethod === 'Pago mixto' ? `<div><strong>Efectivo:</strong> $${sale.paymentBreakdown.cash.toLocaleString('es-AR')} · <strong>Transferencia:</strong> $${sale.paymentBreakdown.transfer.toLocaleString('es-AR')} · <strong>Tarjeta:</strong> $${sale.paymentBreakdown.card.toLocaleString('es-AR')}</div>` : ''}
             `;
+        }
+
+        function openReceiptModal(sale) {
+            lastCreatedSale = sale;
+            document.getElementById('receiptDate').textContent = `Fecha: ${sale.date} | ${getTicketLabel(sale)}`;
+            renderReceiptCustomerInfo(sale);
 
             document.getElementById('receiptItemsList').innerHTML = sale.items.map(i => `
                 <div class="flex justify-between text-slate-800">
@@ -2481,6 +2515,7 @@ let IPHONE_TRADE_IN_RATES = [];
             document.getElementById('printReceiptBtn').classList.toggle('hidden', pending);
             document.getElementById('downloadReceiptBtn').classList.toggle('hidden', pending);
             document.getElementById('receiptModal').classList.remove('hidden');
+            recoverReceiptSeller(sale);
         }
 
         function closeReceiptModal() {
@@ -2559,7 +2594,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 pendingSaleId = result.ticketId;
                 sale.backendTicketId = result.ticketId;
                 sale.ticketNumber = result.ticketNumber;
-                sale.sellerName = result.sellerName || 'No registrado';
+                sale.sellerName = result.sellerName || currentUserProfile?.nick?.trim() || 'No registrado';
                 sale.items = sale.items.map(item => {
                     const saved = result.items.find(entry => entry.id === item.id);
                     if (!saved) throw new Error('El backend devolvió un detalle de venta incompleto.');
@@ -2690,6 +2725,10 @@ let IPHONE_TRADE_IN_RATES = [];
                 showToast('El ticket aún no tiene número. Inicia sesión nuevamente para reintentar.');
                 return;
             }
+            if (receiptSellerRequests.has(lastCreatedSale.backendTicketId)) {
+                showToast('Espera a que termine la consulta del vendedor.');
+                return;
+            }
             const title = document.title;
             document.title = `Ticket-BS-${getTicketNumber(lastCreatedSale)}`;
             try {
@@ -2707,6 +2746,10 @@ let IPHONE_TRADE_IN_RATES = [];
             }
             if (!getTicketNumber(sale)) {
                 showToast('El ticket aún no tiene número. Inicia sesión nuevamente para reintentar.');
+                return;
+            }
+            if (receiptSellerRequests.has(sale.backendTicketId)) {
+                showToast('Espera a que termine la consulta del vendedor.');
                 return;
             }
             try {
