@@ -179,6 +179,7 @@ let IPHONE_TRADE_IN_RATES = [];
         let activeTradeInValuationUsd = 0;
         let lastCreatedSale = null;
         let productFeedbackTimer = null;
+        let systemClockTimer = null;
 
         /* INITIALIZATION ON LOAD */
         window.onload = async function() {
@@ -383,6 +384,8 @@ let IPHONE_TRADE_IN_RATES = [];
             if (salesSummaryTimer) clearInterval(salesSummaryTimer);
             salesSummaryTimer = null;
             await firebase.auth().signOut();
+            if (systemClockTimer) clearInterval(systemClockTimer);
+            systemClockTimer = null;
             currentUserProfile = null;
             posState.ticket = [];
             pendingSaleId = null;
@@ -609,7 +612,8 @@ let IPHONE_TRADE_IN_RATES = [];
                 document.getElementById('clockDate').textContent = now.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
             }
             tick();
-            setInterval(tick, 1000);
+            if (systemClockTimer) clearInterval(systemClockTimer);
+            systemClockTimer = setInterval(tick, 1000);
         }
 
         /* NAVIGATION & TAB SWITCHING */
@@ -3022,13 +3026,7 @@ let IPHONE_TRADE_IN_RATES = [];
         }
 
         function escapeSupplierHtml(value) {
-            return String(value || '').replace(/[&<>"']/g, character => ({
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#39;'
-            })[character]);
+            return escapeReceiptText(value || '');
         }
 
         function renderSuppliers() {
@@ -3095,6 +3093,16 @@ let IPHONE_TRADE_IN_RATES = [];
             return `bestore_supplier_payment_pending_${user.uid}`;
         }
 
+        function isValidSupplierPaymentPending(pending) {
+            return !!pending && /^[a-f0-9-]{36}$/i.test(pending.operationId || '') &&
+                Number.isSafeInteger(pending.amountCents) && pending.amountCents > 0 &&
+                ['cash', 'transfer'].includes(pending.medium) &&
+                (pending.supplierId == null || (typeof pending.supplierId === 'string' &&
+                    /^[A-Za-z0-9_-]{1,100}$/.test(pending.supplierId))) &&
+                typeof pending.payeeName === 'string' && pending.payeeName.length <= 120 &&
+                typeof pending.note === 'string' && pending.note.length <= 300;
+        }
+
         function restoreSupplierPaymentPending() {
             try {
                 const key = supplierPaymentPendingKey();
@@ -3104,13 +3112,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 const stored = localStorage.getItem(key);
                 if (!stored) return;
                 const pending = JSON.parse(stored);
-                if (!pending || !/^[a-f0-9-]{36}$/i.test(pending.operationId || '') ||
-                    !Number.isSafeInteger(pending.amountCents) || pending.amountCents <= 0 ||
-                    !['cash', 'transfer'].includes(pending.medium) ||
-                    (pending.supplierId != null && (typeof pending.supplierId !== 'string' ||
-                        !/^[A-Za-z0-9_-]{1,100}$/.test(pending.supplierId))) ||
-                    typeof pending.payeeName !== 'string' || pending.payeeName.length > 120 ||
-                    typeof pending.note !== 'string' || pending.note.length > 300) {
+                if (!isValidSupplierPaymentPending(pending)) {
                     throw new Error('Hay un pago pendiente local con datos inválidos. Contacta a un administrador antes de continuar.');
                 }
                 const supplier = SUPPLIERS.find(item => item.id === pending.supplierId);
@@ -3140,13 +3142,7 @@ let IPHONE_TRADE_IN_RATES = [];
                 key = supplierPaymentPendingKey();
                 const stored = localStorage.getItem(key);
                 pending = stored ? JSON.parse(stored) : null;
-                if (pending && (!/^[a-f0-9-]{36}$/i.test(pending.operationId || '') ||
-                    !Number.isSafeInteger(pending.amountCents) || pending.amountCents <= 0 ||
-                    !['cash', 'transfer'].includes(pending.medium) ||
-                    (pending.supplierId != null && (typeof pending.supplierId !== 'string' ||
-                        !/^[A-Za-z0-9_-]{1,100}$/.test(pending.supplierId))) ||
-                    typeof pending.payeeName !== 'string' || pending.payeeName.length > 120 ||
-                    typeof pending.note !== 'string' || pending.note.length > 300)) {
+                if (pending && !isValidSupplierPaymentPending(pending)) {
                     throw new Error('Hay un pago pendiente local con datos inválidos. Contacta a un administrador antes de continuar.');
                 }
                 if (!pending) {
@@ -3558,10 +3554,6 @@ let IPHONE_TRADE_IN_RATES = [];
             return error.message || 'No se pudo guardar el producto. Revisa los datos e intenta nuevamente.';
         }
 
-        function autoCalcCashPrice() {
-            updateProductConvertedPrice();
-        }
-
         function updateProductPriceLabel() {
             const currency = document.getElementById('prodCurrency').value || 'ARS';
             document.getElementById('prodPriceLabel').textContent = `Precio de Lista (${currency}) *`;
@@ -3623,17 +3615,13 @@ let IPHONE_TRADE_IN_RATES = [];
                     PRODUCTS.push(productObj);
                 }
 
-                const synced = await saveLocalState({ throwOnRemoteError: true });
+                await saveLocalState({ throwOnRemoteError: true });
                 renderDashboard();
                 renderAccTable();
                 renderCaseSubcategoryOptions();
                 updateAccessorySubcategoryFilter();
                 renderCategoriesPage();
                 if (openCategoryId) showCategoryProducts(openCategoryId);
-                if (!synced) {
-                    showProductFeedback('El cambio quedó guardado en este dispositivo, pero Firebase no lo confirmó. Revisa la conexión y vuelve a intentar.', false);
-                    return;
-                }
                 document.getElementById('productForm').reset();
                 document.getElementById('prodId').value = '';
                 document.getElementById('productModalTitle').textContent = 'Cargar Nuevo Producto';
